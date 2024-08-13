@@ -1,4 +1,0 @@
-set(__QT_DEPLOY_TARGET_database_library_FILE /Users/test/Documents/server/build/database/libdatabase_library.a)
-set(__QT_DEPLOY_TARGET_database_library_TYPE STATIC_LIBRARY)
-set(__QT_DEPLOY_TARGET_server_app_FILE /Users/test/Documents/server/build/server_app.app/Contents/MacOS/server_app)
-set(__QT_DEPLOY_TARGET_server_app_TYPE EXECUTABLE)
