@@ -1,9 +1,9 @@
 #include "database.h"
 
-std::string S3::get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &bucket_name, const std::string &key)
+std::string S3::get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key)
 {
     Aws::S3::Model::GetObjectRequest request;
-    request.SetBucket(bucket_name.c_str());
+    request.SetBucket("slays3");
     request.SetKey(key.c_str());
 
     Aws::S3::Model::GetObjectOutcome outcome = s3_client.GetObject(request);
@@ -22,44 +22,45 @@ std::string S3::get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::
     }
 }
 
-std::string S3::store_data_to_s3(const Aws::S3::S3Client &s3_client, const std::string &bucket_name, const std::string &key, const std::string &data)
+std::string S3::store_data_to_s3(const Aws::S3::S3Client &s3_client, const std::string &key, const std::string &data)
 {
     Aws::S3::Model::PutObjectRequest request;
-    request.SetBucket(bucket_name.c_str());
+    request.SetBucket("slays3");
     request.SetKey(key.c_str());
 
-    std::shared_ptr<Aws::StringStream> data_stream = Aws::MakeShared<Aws::StringStream>("PutObjectStream");
+    auto data_stream = Aws::MakeShared<Aws::StringStream>("PutObjectStream");
     *data_stream << data;
     request.SetBody(data_stream);
 
     Aws::S3::Model::PutObjectOutcome outcome = s3_client.PutObject(request);
     if (outcome.IsSuccess())
     {
-        std::cout << "Successfully uploaded object to " << bucket_name << "/" << key << std::endl;
+        std::cout << "Successfully uploaded object to " << key << std::endl;
 
-        std::string region = "us-east-1";
-        std::string url = "https://" + bucket_name + ".s3." + region + ".amazonaws.com/" + key;
+        std::string url = "https://slays3.s3.us-east-1.amazonaws.com/" + key;
 
         return url;
     }
     else
     {
-        std::cerr << "PutObject error: " << outcome.GetError().GetExceptionName() << " - " << outcome.GetError().GetMessage() << std::endl;
+        std::cerr << "PutObject error: "
+                  << outcome.GetError().GetExceptionName() << " - "
+                  << outcome.GetError().GetMessage() << std::endl;
 
         return std::string();
     }
 }
 
-bool S3::delete_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &bucket_name, const std::string &key)
+bool S3::delete_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key)
 {
     Aws::S3::Model::DeleteObjectRequest request;
-    request.SetBucket(bucket_name.c_str());
+    request.SetBucket("slays3");
     request.SetKey(key.c_str());
 
     Aws::S3::Model::DeleteObjectOutcome outcome = s3_client.DeleteObject(request);
     if (outcome.IsSuccess())
     {
-        std::cout << "Successfully deleted object from " << bucket_name << "/" << key << std::endl;
+        std::cout << "Successfully deleted object from slays3/" << key << std::endl;
 
         return true;
     }
@@ -71,99 +72,43 @@ bool S3::delete_data_from_s3(const Aws::S3::S3Client &s3_client, const std::stri
     }
 }
 
-std::string Security::generate_random_salt(const std::size_t &len)
+QString Security::generate_random_salt(std::size_t len)
 {
-    try
+    const QString valid_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#&?!~^-$%*+";
+    QString salt;
+
+    for (size_t i{0}; i < len; i++)
     {
-        std::string valid_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
-        std::random_device rd;
-        std::mt19937 generator(rd());
-
-        std::uniform_int_distribution<> distribution(0, valid_chars.size() - 1);
-
-        std::string salt;
-        for (size_t i = 0; i < len; i++)
-            salt.push_back(valid_chars[distribution(generator)]);
-
-        return salt;
+        int index = QRandomGenerator::global()->bounded(valid_chars.size());
+        salt.append(valid_chars.at(index));
     }
-    catch (const std::exception &e)
-    {
-        std::cerr << e.what() << std::endl;
 
-        return std::string();
-    }
+    return salt;
 }
 
-std::string Security::hashing_password(const std::string &password)
+QString Security::hashing_password(const QString &password)
 {
-    try
-    {
-        const size_t SALT_LENGTH = 32;
+    const size_t SALT_LENGTH = 32;
+    QString salt = generate_random_salt(SALT_LENGTH);
 
-        std::string salt = generate_random_salt(SALT_LENGTH);
+    QByteArray salted_password = salt.toUtf8() + password.toUtf8();
+    QByteArray hash = QCryptographicHash::hash(salted_password, QCryptographicHash::Sha256);
 
-        const uint32_t t_cost = 2;
-        const uint32_t m_cost = 32;
-        const uint32_t parallelism = 1;
-        const uint32_t hash_length = 32;
-
-        std::string hash;
-        hash.resize(hash_length);
-
-        int result = argon2_hash(t_cost, m_cost, parallelism, password.c_str(), password.length(), salt.c_str(), salt.length(), &hash[0], hash.length(), NULL, 0, Argon2_id, ARGON2_VERSION_NUMBER);
-
-        if (result != ARGON2_OK)
-        {
-            std::cout << "Error Hashing Password" << std::endl;
-
-            return std::string();
-        }
-
-        std::string hashed_password = salt + hash;
-
-        return hashed_password;
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << e.what() << std::endl;
-
-        return std::string();
-    }
+    return salt + QString::fromUtf8(hash.toHex());
 }
 
-bool Security::verifying_password(const std::string &password, const std::string &hashed_password)
+bool Security::verifying_password(const QString &password, const QString &hashed_password)
 {
-    try
-    {
-        const uint32_t t_cost = 2;
-        const uint32_t m_cost = 32;
-        const uint32_t parallelism = 1;
-        const uint32_t hash_length = 32;
+    const uint32_t hash_length = 64;
+    const size_t SALT_LENGTH = hashed_password.length() - hash_length;
 
-        const size_t SALT_LENGTH = hashed_password.length() - hash_length;
+    QString salt = hashed_password.left(SALT_LENGTH);
+    QString original_hash = hashed_password.mid(SALT_LENGTH, hash_length);
 
-        std::string hash;
-        hash.resize(hash_length);
+    QByteArray salted_password = salt.toUtf8() + password.toUtf8();
+    QByteArray hash = QCryptographicHash::hash(salted_password, QCryptographicHash::Sha256);
 
-        int result = argon2_hash(t_cost, m_cost, parallelism, password.c_str(), password.length(), hashed_password.c_str(), SALT_LENGTH, &hash[0], hash.length(), NULL, 0, Argon2_id, ARGON2_VERSION_NUMBER);
-
-        if (result != ARGON2_OK)
-        {
-            std::cout << "Error Verifying Password" << std::endl;
-
-            return false;
-        }
-
-        return !hashed_password.substr(SALT_LENGTH, hash_length).compare(hash);
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << e.what() << std::endl;
-
-        return false;
-    }
+    return !original_hash.compare(QString::fromUtf8(hash.toHex()));
 }
 
 bool Account::insert_document(mongocxx::database &db, const std::string &collection_name, const QJsonObject &json_object)
@@ -229,10 +174,7 @@ bool Account::update_document(mongocxx::database &db, const std::string &collect
         QString filter_json_string = QJsonDocument(filter_object).toJson(QJsonDocument::Compact);
         bsoncxx::document::value filter = bsoncxx::from_json(filter_json_string.toStdString());
 
-        QJsonObject update_json_object;
-        update_json_object.insert("$set", update_object);
-
-        QString update_json_string = QJsonDocument(update_json_object).toJson(QJsonDocument::Compact);
+        QString update_json_string = QJsonDocument(update_object).toJson(QJsonDocument::Compact);
         bsoncxx::document::value update = bsoncxx::from_json(update_json_string.toStdString());
 
         mongocxx::stdx::optional<mongocxx::result::update> result = collection.update_one(filter.view(), update.view());
@@ -281,6 +223,9 @@ QJsonDocument Account::find_document(mongocxx::database &db, const std::string &
 
         if (result_array.isEmpty())
             return QJsonDocument();
+
+        if (!collection_name.compare("groups"))
+            return QJsonDocument(result_array);
 
         return (result_array.size() == 1) ? QJsonDocument(result_array.first().toObject()) : QJsonDocument(result_array);
     }
@@ -339,6 +284,7 @@ QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const in
                        << "last_name" << "$contactInfo.last_name"
                        << "status" << "$contactInfo.status"
                        << "image_url" << "$contactInfo.image_url"
+                       << "chatID" << "$contacts.chatID"
                        << bsoncxx::builder::stream::close_document
                        << "messages" << bsoncxx::builder::stream::open_document
                        << "$push" << "$chatMessages.messages"
@@ -354,6 +300,7 @@ QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const in
                          << "status" << "$_id.status"
                          << "image_url" << "$_id.image_url"
                          << bsoncxx::builder::stream::close_document
+                         << "chatID" << "$_id.chatID"
                          << "chatMessages" << "$messages"
                          << bsoncxx::builder::stream::finalize);
 
@@ -374,13 +321,11 @@ QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const in
     catch (const mongocxx::exception &e)
     {
         std::cerr << "MongoDB Exception: " << e.what() << std::endl;
-
         return QJsonDocument();
     }
     catch (const std::exception &e)
     {
         std::cerr << "std Exception: " << e.what() << std::endl;
-
         return QJsonDocument();
     }
 }

@@ -5,6 +5,9 @@ QHash<int, QString> server_manager::_time_zone;
 mongocxx::database server_manager::_chatAppDB;
 QHash<QString, server_manager::MessageType> server_manager::_map;
 
+Aws::SDKOptions server_manager::_options;
+std::shared_ptr<Aws::S3::S3Client> server_manager::_s3_client;
+
 server_manager::server_manager(const QString &URI_string, QObject *parent)
     : QObject(parent)
 {
@@ -26,7 +29,7 @@ server_manager::server_manager(const QString &URI_string, QObject *parent)
     _chatAppDB = connection.database("chatAppDB");
 
     Aws::InitAPI(_options);
-    _s3_client = std::make_unique<Aws::S3::S3Client>();
+    _s3_client = std::make_shared<Aws::S3::S3Client>();
 
     _server->listen(_ip, _port);
     qDebug() << "Server is running on port: " << _port;
@@ -64,6 +67,10 @@ void server_manager::on_client_disconnected()
         int id = client->property("id").toInt();
         _clients.remove(id);
 
+        QJsonObject filter_object{{"_id", id}};
+        QJsonObject update_field{{"status", false}};
+        Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
+
         QString message;
         if (!_clients.isEmpty())
         {
@@ -75,7 +82,7 @@ void server_manager::on_client_disconnected()
 
 void server_manager::sign_up(const int &phone_number, const QString &first_name, const QString &last_name, const QString &password, const QString &secret_question, const QString &secret_answer)
 {
-    const QString &hashed_password = QString::fromStdString(Security::hashing_password(password.toStdString()));
+    const QString &hashed_password = Security::hashing_password(password);
 
     QJsonObject json_object{{"_id", phone_number},
                             {"first_name", first_name},
@@ -85,7 +92,6 @@ void server_manager::sign_up(const int &phone_number, const QString &first_name,
                             {"hashed_password", hashed_password},
                             {"secret_question", secret_question},
                             {"secret_answer", secret_answer},
-                            {"chats", QJsonArray{}},
                             {"contacts", QJsonArray{}},
                             {"groups", QJsonArray{}}};
 
@@ -121,7 +127,7 @@ void server_manager::login_request(const int &phone_number, const QString &passw
         return;
     }
 
-    if (Security::verifying_password(password.toStdString(), json_doc.object()["hashed_password"].toString().toStdString()))
+    if (!Security::verifying_password(password, json_doc.object()["hashed_password"].toString()))
     {
         QJsonObject json_message{{"type", "login_request"},
                                  {"status", "failed"},
@@ -138,8 +144,9 @@ void server_manager::login_request(const int &phone_number, const QString &passw
     _clients.insert(phone_number, _socket);
     _socket->setProperty("id", phone_number);
 
-    QJsonObject update_object{{"status", true}};
-    Account::update_document(_chatAppDB, "accounts", filter_object, update_object);
+    QJsonObject update_field{{"$set", QJsonObject{{"status", true}}}};
+
+    Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
 
     QJsonDocument contacts = Account::fetch_contacts_and_chats(_chatAppDB, phone_number);
 
@@ -152,6 +159,122 @@ void server_manager::login_request(const int &phone_number, const QString &passw
                         {"message", "loading your data..."},
                         {"contacts", QJsonValue::fromVariant(contacts.toVariant())},
                         {"groups", QJsonValue::fromVariant(groups.toVariant())}};
+
+    _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
+}
+
+void server_manager::audio_received(const QString &audio_name, const QString &audio_data)
+{
+    QByteArray decoded_data = QByteArray::fromBase64(audio_data.toUtf8());
+    std::string decoded_string = decoded_data.toStdString();
+
+    std::string audio_url = S3::store_data_to_s3(*_s3_client, audio_name.toStdString(), decoded_string);
+
+    QJsonObject message{{"type", "audio"},
+                        {"audio_url", QString::fromStdString(audio_url)}};
+
+    _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
+}
+
+void server_manager::lookup_friend(const int &phone_number)
+{
+    QJsonObject filter_object{{"_id", phone_number}};
+    QJsonObject field{{"first_name", 1}};
+
+    QJsonDocument check_up = Account::find_document(_chatAppDB, "accounts", filter_object, field);
+    if (check_up.isEmpty())
+    {
+        QJsonObject message{{"type", "lookup_friend"},
+                            {"status", "failed"},
+                            {"message", "The Account: " + QString::number(phone_number) + " doesn't exist in our Database"}};
+
+        _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
+
+        return;
+    }
+
+    std::random_device rd;
+    std::mt19937 generator(rd());
+    std::uniform_int_distribution<int> distribution(1, std::numeric_limits<int>::max());
+
+    int chatID = distribution(generator);
+
+    QJsonObject push_object{{"contacts", QJsonObject{{"contactID", _socket->property("id").toInt()},
+                                                     {"chatID", chatID}}}};
+
+    QJsonObject update_object{{"$push", push_object}};
+
+    Account::update_document(_chatAppDB, "accounts", filter_object, update_object);
+
+    QWebSocket *client = _clients.value(phone_number);
+    if (client)
+    {
+        filter_object[QStringLiteral("_id")] = _socket->property("id").toInt();
+
+        QJsonObject fields{{"_id", 1},
+                           {"status", 1},
+                           {"first_name", 1},
+                           {"last_name", 1},
+                           {"image_url", 1}};
+
+        QJsonDocument contact_info = Account::find_document(_chatAppDB, "accounts", filter_object, fields);
+
+        QJsonObject obj1{{"contactInfo", contact_info.object()},
+                         {"chatID", chatID}};
+
+        QJsonArray json_array;
+        json_array.append(obj1);
+
+        QJsonObject message{{"type", "added_you"},
+                            {"message", _socket->property("id").toString() + " added You"},
+                            {"json_array", json_array}};
+
+        client->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
+    }
+
+    push_object["contacts"] = QJsonObject{{"contactID", phone_number},
+                                          {"chatID", chatID}};
+    update_object["$push"] = push_object;
+
+    Account::update_document(_chatAppDB, "accounts", filter_object, update_object);
+
+    filter_object[QStringLiteral("_id")] = phone_number;
+
+    QJsonObject fields2{{"_id", 1},
+                        {"status", 1},
+                        {"first_name", 1},
+                        {"last_name", 1},
+                        {"image_url", 1}};
+
+    QJsonDocument contact_info2 = Account::find_document(_chatAppDB, "accounts", filter_object, fields2);
+
+    QJsonObject obj2{{"contactInfo", contact_info2.object()},
+                     {"chatID", chatID}};
+
+    QJsonArray json_array2;
+    json_array2.append(obj2);
+
+    QJsonObject message2{{"type", "lookup_friend"},
+                         {"status", "succeeded"},
+                         {"message", QString::number(phone_number) + " also known as " + check_up.object()["first_name"].toString() + " is now Your friend"},
+                         {"json_array", json_array2}};
+
+    _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message2).toJson()));
+}
+
+void server_manager::profile_image(const QString &file_name, const QString &data)
+{
+    QByteArray decoded_data = QByteArray::fromBase64(data.toUtf8());
+    std::string decoded_string = decoded_data.toStdString();
+
+    std::string url = S3::store_data_to_s3(*_s3_client, file_name.toStdString(), decoded_string);
+
+    _socket->setProperty("id", _socket->property("id").toInt());
+
+    QJsonObject update_field{{"$set", QJsonObject{{"image_url", QString::fromStdString(url)}}}};
+
+    QJsonObject message{{"type", "profile_image"},
+                        {"image_url", QString::fromStdString(url)}};
 
     _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
 }
@@ -176,6 +299,14 @@ void server_manager::on_text_message_received(const QString &message)
     case LoginRequest:
         login_request(json_object["phone_number"].toInt(), json_object["password"].toString(), json_object["time_zone"].toString());
         break;
+    case LookupFriend:
+        lookup_friend(json_object["phone_number"].toInt());
+        break;
+    case ProfileImage:
+        profile_image(json_object["file_name"].toString(), json_object["file_data"].toString());
+        break;
+    case AudioMessage:
+        break;
     case TextMessage:
         break;
     case IsTyping:
@@ -183,8 +314,6 @@ void server_manager::on_text_message_received(const QString &message)
     case SetName:
         break;
     case FileMessage:
-        break;
-    case AudioMessage:
         break;
     case SaveData:
         break;
@@ -195,8 +324,6 @@ void server_manager::on_text_message_received(const QString &message)
     case ClientConnected:
         break;
     case AddedYou:
-        break;
-    case LookupFriend:
         break;
     case CreateConversation:
         break;
@@ -245,6 +372,7 @@ void server_manager::map_initialization()
     _map["sign_up"] = SignUp;
     _map["login_request"] = LoginRequest;
     _map["is_typing"] = IsTyping;
+    _map["profile_image"] = ProfileImage;
     _map["set_name"] = SetName;
     _map["file"] = FileMessage;
     _map["audio"] = AudioMessage;

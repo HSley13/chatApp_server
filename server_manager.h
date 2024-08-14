@@ -17,6 +17,9 @@ public:
 
     void sign_up(const int &phone_number, const QString &first_name, const QString &last_name, const QString &password, const QString &secret_question, const QString &secret_answer);
     void login_request(const int &phone_number, const QString &password, const QString &time_zone);
+    void audio_received(const QString &audio_name, const QString &audio_data);
+    void lookup_friend(const int &phone_number);
+    void profile_image(const QString &file_name, const QString &data);
 
 private slots:
     void on_new_connection();
@@ -31,8 +34,8 @@ private:
     static QHash<int, QWebSocket *> _clients;
     static QHash<int, QString> _time_zone;
 
-    Aws::SDKOptions _options;
-    std::unique_ptr<Aws::S3::S3Client> _s3_client;
+    static Aws::SDKOptions _options;
+    static std::shared_ptr<Aws::S3::S3Client> _s3_client;
 
     QHostAddress _ip{QHostAddress::Any};
     int _port{12345};
@@ -44,6 +47,7 @@ private:
         SignUp = Qt::UserRole + 1,
         IsTyping,
         SetName,
+        ProfileImage,
         FileMessage,
         AudioMessage,
         SaveData,

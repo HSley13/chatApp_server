@@ -11,7 +11,6 @@
 #include <QWebSocketServer>
 
 #include <iostream>
-#include <argon2.h>
 
 #include <mongocxx/client.hpp>
 #include <bsoncxx/builder/stream/document.hpp>
@@ -30,11 +29,11 @@
 class Security
 {
 public:
-    static std::string generate_random_salt(const std::size_t &len);
+    static QString generate_random_salt(std::size_t len);
 
-    static std::string hashing_password(const std::string &password);
+    static QString hashing_password(const QString &password);
 
-    static bool verifying_password(const std::string &password, const std::string &hashed_password);
+    static bool verifying_password(const QString &password, const QString &hashed_password);
 };
 
 class Account
@@ -54,9 +53,9 @@ public:
 class S3
 {
 public:
-    static std::string get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &bucket_name, const std::string &key);
+    static std::string get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key);
 
-    static std::string store_data_to_s3(const Aws::S3::S3Client &s3_client, const std::string &bucket_name, const std::string &key, const std::string &data);
+    static std::string store_data_to_s3(const Aws::S3::S3Client &s3_client, const std::string &key, const std::string &data);
 
-    static bool delete_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &bucket_name, const std::string &key);
+    static bool delete_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key);
 };
