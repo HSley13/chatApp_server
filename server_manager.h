@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QJsonValue>
+#include <QTime>
 
 #include "database.h"
 
@@ -20,7 +21,9 @@ public:
     void audio_received(const QString &audio_name, const QString &audio_data);
     void lookup_friend(const int &phone_number);
     void profile_image(const QString &file_name, const QString &data);
+    void profile_image_deleted();
     void text_received(const int &receiver, const QString &message, const QString &time, const int &chat_ID);
+    void new_group(const QString &group_name, QJsonArray group_members);
 
 private slots:
     void on_new_connection();
@@ -49,15 +52,14 @@ private:
         IsTyping,
         SetName,
         ProfileImage,
+        ProfileImageDeleted,
         FileMessage,
         AudioMessage,
         SaveData,
         ClientNewName,
         ClientDisconnected,
         ClientConnected,
-        AddedYou,
         LookupFriend,
-        CreateConversation,
         SaveMessage,
         TextMessage,
         LoginRequest,
