@@ -21,9 +21,11 @@ public:
     void audio_received(const QString &audio_name, const QString &audio_data);
     void lookup_friend(const int &phone_number);
     void profile_image(const QString &file_name, const QString &data);
+    void group_profile_image(const int &group_ID, const QString &file_name, const QString &data);
     void profile_image_deleted();
     void text_received(const int &receiver, const QString &message, const QString &time, const int &chat_ID);
     void new_group(const QString &group_name, QJsonArray group_members);
+    void group_text_received(const int &groupID, QString sender_name, const QString &message, const QString &time);
 
 private slots:
     void on_new_connection();
@@ -52,8 +54,11 @@ private:
         IsTyping,
         SetName,
         ProfileImage,
+        GroupProfileImage,
         ProfileImageDeleted,
         FileMessage,
+        Text,
+        GroupText,
         AudioMessage,
         SaveData,
         ClientNewName,
@@ -61,7 +66,6 @@ private:
         ClientConnected,
         LookupFriend,
         SaveMessage,
-        TextMessage,
         LoginRequest,
         NewPasswordRequest,
         UpdatePassword,
@@ -70,7 +74,6 @@ private:
         NewGroup,
         AddedToGroup,
         GroupIsTyping,
-        GroupText,
         GroupFile,
         GroupAudio,
         NewGroupMember,

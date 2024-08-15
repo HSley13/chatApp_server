@@ -322,6 +322,30 @@ void server_manager::profile_image(const QString &file_name, const QString &data
     }
 }
 
+void server_manager::group_profile_image(const int &group_ID, const QString &file_name, const QString &data)
+{
+    QByteArray decoded_data = QByteArray::fromBase64(data.toUtf8());
+    std::string decoded_string = decoded_data.toStdString();
+
+    std::string url = S3::store_data_to_s3(*_s3_client, file_name.toStdString(), decoded_string);
+
+    QJsonObject filter_object{{"_id", group_ID}};
+    QJsonObject update_field{{"$set", QJsonObject{{"group_image_url", QString::fromStdString(url)}}}};
+    Account::update_document(_chatAppDB, "groups", filter_object, update_field);
+
+    QJsonObject message{{"type", "group_profile_image"},
+                        {"groupID", group_ID},
+                        {"group_image_url", QString::fromStdString(url)}};
+
+    QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
+    for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
+    {
+        QWebSocket *client = _clients.value(phone_number.toInt());
+        if (client)
+            client->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
+    }
+}
+
 void server_manager::profile_image_deleted()
 {
     QJsonObject filter_object{{"_id", _socket->property("id").toInt()}};
@@ -416,6 +440,40 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
     }
 }
 
+void server_manager::group_text_received(const int &groupID, QString sender_name, const QString &message, const QString &time)
+{
+    QJsonObject filter_object{{"_id", groupID}};
+
+    QJsonObject message_obj{{"type", "group_text"},
+                            {"groupID", groupID},
+                            {"sender_ID", _clients.key(_socket)},
+                            {"sender_name", sender_name},
+                            {"message", message},
+                            {"time", time}};
+
+    QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
+    for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
+    {
+        if (phone_number.toInt() == _clients.key(_socket))
+            continue;
+
+        QWebSocket *client = _clients.value(phone_number.toInt());
+        if (client)
+            client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+    }
+
+    QJsonObject push_field{{"message", message},
+                           {"sender_ID", _clients.key(_socket)},
+                           {"sender_name", sender_name},
+                           {"time", time}};
+
+    QJsonObject push_object{{"group_messages", push_field}};
+
+    QJsonObject update_object{{"$push", push_object}};
+
+    Account::update_document(_chatAppDB, "groups", filter_object, update_object);
+}
+
 void server_manager::on_text_message_received(const QString &message)
 {
     QJsonDocument json_doc = QJsonDocument::fromJson(message.toUtf8());
@@ -442,14 +500,20 @@ void server_manager::on_text_message_received(const QString &message)
     case ProfileImage:
         profile_image(json_object["file_name"].toString(), json_object["file_data"].toString());
         break;
+    case GroupProfileImage:
+        group_profile_image(json_object["groupID"].toInt(), json_object["file_name"].toString(), json_object["file_data"].toString());
+        break;
     case ProfileImageDeleted:
         profile_image_deleted();
         break;
-    case TextMessage:
+    case Text:
         text_received(json_object["receiver"].toInt(), json_object["message"].toString(), json_object["time"].toString(), json_object["chatID"].toInt());
         break;
     case NewGroup:
         new_group(json_object["group_name"].toString(), json_object["group_members"].toArray());
+        break;
+    case GroupText:
+        group_text_received(json_object["groupID"].toInt(), json_object["sender_name"].toString(), json_object["message"].toString(), json_object["time"].toString());
         break;
     case AudioMessage:
         break;
@@ -477,11 +541,7 @@ void server_manager::on_text_message_received(const QString &message)
         break;
     case DeleteGroupMessage:
         break;
-    case AddedToGroup:
-        break;
     case GroupIsTyping:
-        break;
-    case GroupText:
         break;
     case GroupFile:
         break;
@@ -511,12 +571,14 @@ void server_manager::map_initialization()
     _map["login_request"] = LoginRequest;
     _map["is_typing"] = IsTyping;
     _map["profile_image"] = ProfileImage;
+    _map["group_profile_image"] = GroupProfileImage;
     _map["profile_image_deleted"] = ProfileImageDeleted;
     _map["client_disconnected"] = ClientDisconnected;
     _map["client_connected"] = ClientConnected;
     _map["lookup_friend"] = LookupFriend;
     _map["new_group"] = NewGroup;
-    _map["text"] = TextMessage;
+    _map["text"] = Text;
+    _map["group_text"] = GroupText;
     _map["added_to_group"] = AddedToGroup;
     _map["set_name"] = SetName;
     _map["file"] = FileMessage;
@@ -529,7 +591,6 @@ void server_manager::map_initialization()
     _map["delete_message"] = DeleteMessage;
     _map["delete_group_message"] = DeleteGroupMessage;
     _map["group_is_typing"] = GroupIsTyping;
-    _map["group_text"] = GroupText;
     _map["group_file"] = GroupFile;
     _map["group_audio"] = GroupAudio;
     _map["new_group_member"] = NewGroupMember;
