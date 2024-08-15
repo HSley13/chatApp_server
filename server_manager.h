@@ -20,6 +20,7 @@ public:
     void audio_received(const QString &audio_name, const QString &audio_data);
     void lookup_friend(const int &phone_number);
     void profile_image(const QString &file_name, const QString &data);
+    void text_received(const int &receiver, const QString &message, const QString &time, const int &chat_ID);
 
 private slots:
     void on_new_connection();

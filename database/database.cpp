@@ -172,9 +172,11 @@ bool Account::update_document(mongocxx::database &db, const std::string &collect
         mongocxx::collection collection = db.collection(collection_name);
 
         QString filter_json_string = QJsonDocument(filter_object).toJson(QJsonDocument::Compact);
+
         bsoncxx::document::value filter = bsoncxx::from_json(filter_json_string.toStdString());
 
         QString update_json_string = QJsonDocument(update_object).toJson(QJsonDocument::Compact);
+
         bsoncxx::document::value update = bsoncxx::from_json(update_json_string.toStdString());
 
         mongocxx::stdx::optional<mongocxx::result::update> result = collection.update_one(filter.view(), update.view());
@@ -327,5 +329,65 @@ QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const in
     {
         std::cerr << "std Exception: " << e.what() << std::endl;
         return QJsonDocument();
+    }
+}
+
+QJsonArray Account::fetch_contactIDs(mongocxx::database &db, const int &account_id)
+{
+    try
+    {
+        mongocxx::collection collection = db.collection("accounts");
+
+        mongocxx::pipeline pipeline{};
+
+        pipeline.match(bsoncxx::builder::stream::document{}
+                       << "_id" << account_id
+                       << bsoncxx::builder::stream::finalize);
+
+        pipeline.unwind("$contacts");
+
+        pipeline.group(bsoncxx::builder::stream::document{}
+                       << "_id" << bsoncxx::types::b_null{}
+                       << "contactIDs" << bsoncxx::builder::stream::open_document
+                       << "$addToSet" << "$contacts.contactID"
+                       << bsoncxx::builder::stream::close_document
+                       << bsoncxx::builder::stream::finalize);
+
+        pipeline.project(bsoncxx::builder::stream::document{}
+                         << "_id" << 0
+                         << "contactIDs" << 1
+                         << bsoncxx::builder::stream::finalize);
+
+        mongocxx::cursor cursor = collection.aggregate(pipeline);
+
+        QJsonArray contact_ids_array;
+        for (const bsoncxx::document::view &doc : cursor)
+        {
+            QString json_string = QString::fromStdString(bsoncxx::to_json(doc));
+            QJsonDocument json_doc = QJsonDocument::fromJson(json_string.toUtf8());
+
+            if (!json_doc.isNull() && json_doc.isObject())
+            {
+                QJsonObject json_obj = json_doc.object();
+                QJsonArray ids = json_obj["contactIDs"].toArray();
+
+                for (const QJsonValue &val : ids)
+                    contact_ids_array.append(val.toInt());
+            }
+        }
+
+        return contact_ids_array;
+    }
+    catch (const mongocxx::exception &e)
+    {
+        std::cerr << "MongoDB Exception: " << e.what() << std::endl;
+
+        return QJsonArray();
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "std Exception: " << e.what() << std::endl;
+
+        return QJsonArray();
     }
 }

@@ -52,7 +52,6 @@ server_manager::server_manager(QWebSocket *client, QObject *parent)
 void server_manager::on_new_connection()
 {
     QWebSocket *client = _server->nextPendingConnection();
-    qDebug() << "New Client Connected";
 
     connect(client, &QWebSocket::disconnected, this, &server_manager::on_client_disconnected);
 
@@ -67,15 +66,23 @@ void server_manager::on_client_disconnected()
         int id = client->property("id").toInt();
         _clients.remove(id);
 
+        qDebug() << "Client: " << id << " is disconnected";
+
         QJsonObject filter_object{{"_id", id}};
-        QJsonObject update_field{{"status", false}};
+        QJsonObject update_field{{"$set", QJsonObject{{"status", false}}}};
         Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
 
-        QString message;
-        if (!_clients.isEmpty())
+        QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, id);
+        for (const QJsonValue &ID : contactIDs)
         {
-            for (QWebSocket *cl : _clients)
-                cl->sendTextMessage(message);
+            QWebSocket *client = _clients.value(ID.toInt());
+            if (client)
+            {
+                QJsonObject message{{"type", "client_disconnected"},
+                                    {"phone_number", id}};
+
+                client->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
+            }
         }
     }
 }
@@ -140,12 +147,13 @@ void server_manager::login_request(const int &phone_number, const QString &passw
         return;
     }
 
+    qDebug() << "Client: " << phone_number << " is connected";
+
     _time_zone.insert(phone_number, time_zone);
     _clients.insert(phone_number, _socket);
     _socket->setProperty("id", phone_number);
 
     QJsonObject update_field{{"$set", QJsonObject{{"status", true}}}};
-
     Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
 
     QJsonDocument contacts = Account::fetch_contacts_and_chats(_chatAppDB, phone_number);
@@ -157,10 +165,27 @@ void server_manager::login_request(const int &phone_number, const QString &passw
     QJsonObject message{{"type", "login_request"},
                         {"status", "succeeded"},
                         {"message", "loading your data..."},
+                        {"my_info", json_doc.object()},
                         {"contacts", QJsonValue::fromVariant(contacts.toVariant())},
                         {"groups", QJsonValue::fromVariant(groups.toVariant())}};
 
     _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
+
+    QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, phone_number);
+    qDebug() << contactIDs;
+    for (const QJsonValue &ID : contactIDs)
+    {
+        QWebSocket *client = _clients.value(ID.toInt());
+        if (client)
+        {
+            qDebug() << "Friend ID" << ID.toInt();
+
+            QJsonObject message{{"type", "client_connected"},
+                                {"phone_number", phone_number}};
+
+            client->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
+        }
+    }
 }
 
 void server_manager::audio_received(const QString &audio_name, const QString &audio_data)
@@ -269,14 +294,54 @@ void server_manager::profile_image(const QString &file_name, const QString &data
 
     std::string url = S3::store_data_to_s3(*_s3_client, file_name.toStdString(), decoded_string);
 
-    _socket->setProperty("id", _socket->property("id").toInt());
-
+    QJsonObject filter_object{{"_id", _socket->property("id").toInt()}};
     QJsonObject update_field{{"$set", QJsonObject{{"image_url", QString::fromStdString(url)}}}};
+    Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
 
     QJsonObject message{{"type", "profile_image"},
                         {"image_url", QString::fromStdString(url)}};
 
     _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
+
+    QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, _socket->property("id").toInt());
+    for (const QJsonValue &ID : contactIDs)
+    {
+        QWebSocket *client = _clients.value(ID.toInt());
+        if (client)
+        {
+            QJsonObject message{{"type", "client_profile_image"},
+                                {"phone_number", _socket->property("id").toInt()},
+                                {"image_url", QString::fromStdString(url)}};
+        };
+
+        client->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
+    }
+}
+
+void server_manager::text_received(const int &receiver, const QString &message, const QString &time, const int &chat_ID)
+{
+    QWebSocket *client = _clients.value(receiver);
+    if (client)
+    {
+        QJsonObject message_obj{{"type", "text"},
+                                {"message", message},
+                                {"chatID", chat_ID},
+                                {"time", time}};
+
+        client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+    }
+
+    QJsonObject filter_object{{"_id", chat_ID}};
+
+    QJsonObject push_field{{"message", message},
+                           {"sender", _clients.key(_socket)},
+                           {"time", time}};
+
+    QJsonObject push_object{{"messages", push_field}};
+
+    QJsonObject update_object{{"$push", push_object}};
+
+    Account::update_document(_chatAppDB, "chats", filter_object, update_object);
 }
 
 void server_manager::on_text_message_received(const QString &message)
@@ -305,9 +370,10 @@ void server_manager::on_text_message_received(const QString &message)
     case ProfileImage:
         profile_image(json_object["file_name"].toString(), json_object["file_data"].toString());
         break;
-    case AudioMessage:
-        break;
     case TextMessage:
+        text_received(json_object["receiver"].toInt(), json_object["message"].toString(), json_object["time"].toString(), json_object["chatID"].toInt());
+        break;
+    case AudioMessage:
         break;
     case IsTyping:
         break;
@@ -322,8 +388,6 @@ void server_manager::on_text_message_received(const QString &message)
     case ClientDisconnected:
         break;
     case ClientConnected:
-        break;
-    case AddedYou:
         break;
     case CreateConversation:
         break;
@@ -373,13 +437,13 @@ void server_manager::map_initialization()
     _map["login_request"] = LoginRequest;
     _map["is_typing"] = IsTyping;
     _map["profile_image"] = ProfileImage;
+    _map["client_disconnected"] = ClientDisconnected;
+    _map["client_connected"] = ClientConnected;
     _map["set_name"] = SetName;
     _map["file"] = FileMessage;
     _map["audio"] = AudioMessage;
     _map["save_data"] = SaveData;
     _map["client_new_name"] = ClientNewName;
-    _map["client_disconnected"] = ClientDisconnected;
-    _map["client_connected"] = ClientConnected;
     _map["added_you"] = AddedYou;
     _map["lookup_friend"] = LookupFriend;
     _map["create_conversation"] = CreateConversation;

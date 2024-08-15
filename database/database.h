@@ -48,6 +48,8 @@ public:
     static QJsonDocument find_document(mongocxx::database &db, const std::string &collection_name, const QJsonObject &filter_object, const QJsonObject &fields = QJsonObject());
 
     static QJsonDocument fetch_contacts_and_chats(mongocxx::database &db, const int &account_id);
+
+    static QJsonArray fetch_contactIDs(mongocxx::database &db, const int &account_id);
 };
 
 class S3
