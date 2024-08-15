@@ -26,6 +26,8 @@ public:
     void text_received(const int &receiver, const QString &message, const QString &time, const int &chat_ID);
     void new_group(const QString &group_name, QJsonArray group_members);
     void group_text_received(const int &groupID, QString sender_name, const QString &message, const QString &time);
+    void file_received(const int &chatID, const int &receiver, const QString &file_name, const QString &file_data, const QString &time);
+    void group_file_received(const int &groupID, const QString &sender_name, const QString &file_name, const QString &file_data, const QString &time);
 
 private slots:
     void on_new_connection();
@@ -56,7 +58,7 @@ private:
         ProfileImage,
         GroupProfileImage,
         ProfileImageDeleted,
-        FileMessage,
+        File,
         Text,
         GroupText,
         AudioMessage,

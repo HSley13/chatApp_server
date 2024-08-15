@@ -221,7 +221,7 @@ void server_manager::lookup_friend(const int &phone_number)
 
     int chatID = distribution(generator);
 
-    QJsonObject push_object{{"contacts", QJsonObject{{"contactID", _socket->property("id").toInt()},
+    QJsonObject push_object{{"contacts", QJsonObject{{"contactID", _clients.key(_socket)},
                                                      {"chatID", chatID}}}};
     QJsonObject update_object{{"$push", push_object}};
     Account::update_document(_chatAppDB, "accounts", filter_object, update_object);
@@ -238,7 +238,7 @@ void server_manager::lookup_friend(const int &phone_number)
     QWebSocket *client = _clients.value(phone_number);
     if (client)
     {
-        filter_object[QStringLiteral("_id")] = _socket->property("id").toInt();
+        filter_object[QStringLiteral("_id")] = _clients.key(_socket);
 
         QJsonObject fields{{"_id", 1},
                            {"status", 1},
@@ -298,7 +298,7 @@ void server_manager::profile_image(const QString &file_name, const QString &data
 
     std::string url = S3::store_data_to_s3(*_s3_client, file_name.toStdString(), decoded_string);
 
-    QJsonObject filter_object{{"_id", _socket->property("id").toInt()}};
+    QJsonObject filter_object{{"_id", _clients.key(_socket)}};
     QJsonObject update_field{{"$set", QJsonObject{{"image_url", QString::fromStdString(url)}}}};
     Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
 
@@ -307,14 +307,14 @@ void server_manager::profile_image(const QString &file_name, const QString &data
 
     _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message1).toJson()));
 
-    QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, _socket->property("id").toInt());
+    QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, _clients.key(_socket));
     for (const QJsonValue &ID : contactIDs)
     {
         QWebSocket *client = _clients.value(ID.toInt());
         if (client)
         {
             QJsonObject message2{{"type", "client_profile_image"},
-                                 {"phone_number", _socket->property("id").toInt()},
+                                 {"phone_number", _clients.key(_socket)},
                                  {"image_url", QString::fromStdString(url)}};
 
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message2).toJson()));
@@ -348,18 +348,18 @@ void server_manager::group_profile_image(const int &group_ID, const QString &fil
 
 void server_manager::profile_image_deleted()
 {
-    QJsonObject filter_object{{"_id", _socket->property("id").toInt()}};
+    QJsonObject filter_object{{"_id", _clients.key(_socket)}};
     QJsonObject update_field{{"$set", QJsonObject{{"image_url", "https://slays3.s3.us-east-1.amazonaws.com/contact.png"}}}};
     Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
 
-    QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, _socket->property("id").toInt());
+    QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, _clients.key(_socket));
     for (const QJsonValue &ID : contactIDs)
     {
         QWebSocket *client = _clients.value(ID.toInt());
         if (client)
         {
             QJsonObject message2{{"type", "client_profile_image"},
-                                 {"phone_number", _socket->property("id").toInt()},
+                                 {"phone_number", _clients.key(_socket)},
                                  {"image_url", "https://slays3.s3.us-east-1.amazonaws.com/contact.png"}};
 
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message2).toJson()));
@@ -403,7 +403,7 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
 
     QJsonObject new_group{{"_id", groupID},
                           {"group_name", group_name},
-                          {"group_admin", _socket->property("id").toInt()},
+                          {"group_admin", _clients.key(_socket)},
                           {"group_image_url", "https://slays3.s3.amazonaws.com/networking.png"},
                           {"group_members", QJsonArray{group_members}},
                           {"group_messages", QJsonArray{}}};
@@ -423,7 +423,7 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
         {
             QJsonObject group_info{{"_id", groupID},
                                    {"group_name", group_name},
-                                   {"group_admin", _socket->property("id").toInt()},
+                                   {"group_admin", _clients.key(_socket)},
                                    {"messages", QJsonArray{}},
                                    {"group_members", group_members},
                                    {"group_image_url", "https://slays3.s3.amazonaws.com/networking.png"},
@@ -463,6 +463,72 @@ void server_manager::group_text_received(const int &groupID, QString sender_name
     }
 
     QJsonObject push_field{{"message", message},
+                           {"sender_ID", _clients.key(_socket)},
+                           {"sender_name", sender_name},
+                           {"time", time}};
+
+    QJsonObject push_object{{"group_messages", push_field}};
+
+    QJsonObject update_object{{"$push", push_object}};
+
+    Account::update_document(_chatAppDB, "groups", filter_object, update_object);
+}
+
+void server_manager::file_received(const int &chatID, const int &receiver, const QString &file_name, const QString &file_data, const QString &time)
+{
+    QByteArray decoded_data = QByteArray::fromBase64(file_data.toUtf8());
+    std::string decoded_string = decoded_data.toStdString();
+
+    std::string file_url = S3::store_data_to_s3(*_s3_client, file_name.toStdString(), decoded_string);
+
+    QJsonObject message_obj{{"type", "file"},
+                            {"chatID", chatID},
+                            {"sender_ID", _clients.key(_socket)},
+                            {"file_url", QString::fromStdString(file_url)},
+                            {"time", time}};
+    QWebSocket *client = _clients.value(receiver);
+    if (client)
+        client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+
+    _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+
+    QJsonObject filter_object{{"_id", chatID}};
+
+    QJsonObject push_field{{"file_url", QString::fromStdString(file_url)},
+                           {"sender", _clients.key(_socket)},
+                           {"time", time}};
+    QJsonObject push_object{{"messages", push_field}};
+
+    QJsonObject update_object{{"$push", push_object}};
+
+    Account::update_document(_chatAppDB, "chats", filter_object, update_object);
+}
+
+void server_manager::group_file_received(const int &groupID, const QString &sender_name, const QString &file_name, const QString &file_data, const QString &time)
+{
+    QByteArray decoded_data = QByteArray::fromBase64(file_data.toUtf8());
+    std::string decoded_string = decoded_data.toStdString();
+
+    std::string file_url = S3::store_data_to_s3(*_s3_client, file_name.toStdString(), decoded_string);
+
+    QJsonObject filter_object{{"_id", groupID}};
+
+    QJsonObject message_obj{{"type", "group_file"},
+                            {"groupID", groupID},
+                            {"sender_ID", _clients.key(_socket)},
+                            {"sender_name", sender_name},
+                            {"file_url", QString::fromStdString(file_url)},
+                            {"time", time}};
+
+    QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
+    for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
+    {
+        QWebSocket *client = _clients.value(phone_number.toInt());
+        if (client)
+            client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+    }
+
+    QJsonObject push_field{{"file_url", QString::fromStdString(file_url)},
                            {"sender_ID", _clients.key(_socket)},
                            {"sender_name", sender_name},
                            {"time", time}};
@@ -515,13 +581,17 @@ void server_manager::on_text_message_received(const QString &message)
     case GroupText:
         group_text_received(json_object["groupID"].toInt(), json_object["sender_name"].toString(), json_object["message"].toString(), json_object["time"].toString());
         break;
+    case File:
+        file_received(json_object["chatID"].toInt(), json_object["receiver"].toInt(), json_object["file_name"].toString(), json_object["file_data"].toString(), json_object["time"].toString());
+        break;
+    case GroupFile:
+        group_file_received(json_object["groupID"].toInt(), json_object["sender_name"].toString(), json_object["file_name"].toString(), json_object["file_data"].toString(), json_object["time"].toString());
+        break;
     case AudioMessage:
         break;
     case IsTyping:
         break;
     case SetName:
-        break;
-    case FileMessage:
         break;
     case SaveData:
         break;
@@ -542,8 +612,6 @@ void server_manager::on_text_message_received(const QString &message)
     case DeleteGroupMessage:
         break;
     case GroupIsTyping:
-        break;
-    case GroupFile:
         break;
     case GroupAudio:
         break;
@@ -580,8 +648,9 @@ void server_manager::map_initialization()
     _map["text"] = Text;
     _map["group_text"] = GroupText;
     _map["added_to_group"] = AddedToGroup;
+    _map["file"] = File;
+    _map["group_file"] = GroupFile;
     _map["set_name"] = SetName;
-    _map["file"] = FileMessage;
     _map["audio"] = AudioMessage;
     _map["save_data"] = SaveData;
     _map["client_new_name"] = ClientNewName;
@@ -591,7 +660,6 @@ void server_manager::map_initialization()
     _map["delete_message"] = DeleteMessage;
     _map["delete_group_message"] = DeleteGroupMessage;
     _map["group_is_typing"] = GroupIsTyping;
-    _map["group_file"] = GroupFile;
     _map["group_audio"] = GroupAudio;
     _map["new_group_member"] = NewGroupMember;
     _map["remove_group_member"] = RemoveGroupMember;
