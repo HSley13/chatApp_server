@@ -584,7 +584,7 @@ void server_manager::update_info_received(const QString &first_name, const QStri
         QWebSocket *client = _clients.value(ID.toInt());
         if (client)
         {
-            QJsonObject message2{{"type", "update_info"},
+            QJsonObject message2{{"type", "contact_info_updated"},
                                  {"phone_number", _clients.key(_socket)},
                                  {"first_name", first_name},
                                  {"last_name", last_name}};
@@ -592,6 +592,28 @@ void server_manager::update_info_received(const QString &first_name, const QStri
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message2).toJson()));
         };
     }
+}
+
+void server_manager::update_password(const int &phone_number, const QString &password)
+{
+    const QString &hashed_password = Security::hashing_password(password);
+
+    QJsonObject filter_object{{"_id", phone_number}};
+    QJsonObject update_field{{"$set", QJsonObject{{"hashed_password", hashed_password}}}};
+    Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
+}
+
+void server_manager::retrieve_question(const int &phone_number)
+{
+    QJsonObject filter_object{{"_id", phone_number}};
+
+    QJsonDocument json_doc = Account::find_document(_chatAppDB, "accounts", filter_object, QJsonObject{{"secret_question", 1}, {"secret_answer", 1}});
+
+    QJsonObject message_obj{{"type", "question_answer"},
+                            {"secret_question", json_doc.object()["secret_question"].toString()},
+                            {"secret_answer", json_doc.object()["secret_answer"].toString()}};
+
+    _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
 }
 
 void server_manager::on_text_message_received(const QString &message)
@@ -650,6 +672,12 @@ void server_manager::on_text_message_received(const QString &message)
     case UpdateInfo:
         update_info_received(json_object["first_name"].toString(), json_object["last_name"].toString(), json_object["password"].toString());
         break;
+    case UpdatePassword:
+        update_password(json_object["phone_number"].toInt(), json_object["password"].toString());
+        break;
+    case RetrieveQuestion:
+        retrieve_question(json_object["phone_number"].toInt());
+        break;
     case AudioMessage:
         break;
     case SetName:
@@ -702,7 +730,9 @@ void server_manager::map_initialization()
     _map["file"] = File;
     _map["group_file"] = GroupFile;
     _map["group_is_typing"] = GroupIsTyping;
-    _map["update_info"] = UpdateInfo;
+    _map["contact_info_updated"] = UpdateInfo;
+    _map["update_password"] = UpdatePassword;
+    _map["retrieve_question"] = RetrieveQuestion;
     _map["set_name"] = SetName;
     _map["audio"] = AudioMessage;
     _map["client_new_name"] = ClientNewName;

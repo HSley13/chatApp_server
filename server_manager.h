@@ -31,6 +31,8 @@ public:
     void is_typing_received(const int &receiver);
     void group_is_typing_received(const int &groupID);
     void update_info_received(const QString &first_name, const QString &last_name, const QString &password);
+    void update_password(const int &phone_number, const QString &password);
+    void retrieve_question(const int &phone_number);
 
 private slots:
     void on_new_connection();
@@ -74,6 +76,8 @@ private:
         AddedToGroup,
         GroupIsTyping,
         UpdateInfo,
+        UpdatePassword,
+        RetrieveQuestion,
         AudioMessage,
         NewPasswordRequest,
         DeleteMessage,
