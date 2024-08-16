@@ -28,6 +28,8 @@ public:
     void group_text_received(const int &groupID, QString sender_name, const QString &message, const QString &time);
     void file_received(const int &chatID, const int &receiver, const QString &file_name, const QString &file_data, const QString &time);
     void group_file_received(const int &groupID, const QString &sender_name, const QString &file_name, const QString &file_data, const QString &time);
+    void is_typing_received(const int &receiver);
+    void group_is_typing_received(const int &groupID);
 
 private slots:
     void on_new_connection();
@@ -60,27 +62,24 @@ private:
         ProfileImageDeleted,
         File,
         Text,
+        GroupFile,
         GroupText,
-        AudioMessage,
-        SaveData,
+        LoginRequest,
         ClientNewName,
         ClientDisconnected,
         ClientConnected,
         LookupFriend,
-        SaveMessage,
-        LoginRequest,
+        NewGroup,
+        AddedToGroup,
+        AudioMessage,
         NewPasswordRequest,
         UpdatePassword,
         DeleteMessage,
         DeleteGroupMessage,
-        NewGroup,
-        AddedToGroup,
         GroupIsTyping,
-        GroupFile,
         GroupAudio,
         NewGroupMember,
         RemoveGroupMember,
-        RequestData,
         DeleteAccount,
         LastMessageRead,
         GroupLastMessageRead,

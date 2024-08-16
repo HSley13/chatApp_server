@@ -540,6 +540,38 @@ void server_manager::group_file_received(const int &groupID, const QString &send
     Account::update_document(_chatAppDB, "groups", filter_object, update_object);
 }
 
+void server_manager::is_typing_received(const int &receiver)
+{
+    QWebSocket *client = _clients.value(receiver);
+    if (client)
+    {
+        QJsonObject message_obj{{"type", "is_typing"},
+                                {"sender_ID", _clients.key(_socket)}};
+
+        client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+    }
+}
+
+void server_manager::group_is_typing_received(const int &groupID)
+{
+    QJsonObject filter_object{{"_id", groupID}};
+
+    QJsonObject message_obj{{"type", "group_is_typing"},
+                            {"groupID", groupID},
+                            {"sender_ID", _clients.key(_socket)}};
+
+    QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
+    for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
+    {
+        if (phone_number.toInt() == _clients.key(_socket))
+            continue;
+
+        QWebSocket *client = _clients.value(phone_number.toInt());
+        if (client)
+            client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+    }
+}
+
 void server_manager::on_text_message_received(const QString &message)
 {
     QJsonDocument json_doc = QJsonDocument::fromJson(message.toUtf8());
@@ -587,21 +619,22 @@ void server_manager::on_text_message_received(const QString &message)
     case GroupFile:
         group_file_received(json_object["groupID"].toInt(), json_object["sender_name"].toString(), json_object["file_name"].toString(), json_object["file_data"].toString(), json_object["time"].toString());
         break;
+    case IsTyping:
+        is_typing_received(json_object["receiver"].toInt());
+        break;
+    case GroupIsTyping:
+        group_is_typing_received(json_object["groupID"].toInt());
+        break;
+        break;
     case AudioMessage:
         break;
-    case IsTyping:
-        break;
     case SetName:
-        break;
-    case SaveData:
         break;
     case ClientNewName:
         break;
     case ClientDisconnected:
         break;
     case ClientConnected:
-        break;
-    case SaveMessage:
         break;
     case NewPasswordRequest:
         break;
@@ -611,15 +644,11 @@ void server_manager::on_text_message_received(const QString &message)
         break;
     case DeleteGroupMessage:
         break;
-    case GroupIsTyping:
-        break;
     case GroupAudio:
         break;
     case NewGroupMember:
         break;
     case RemoveGroupMember:
-        break;
-    case RequestData:
         break;
     case DeleteAccount:
         break;
@@ -650,20 +679,17 @@ void server_manager::map_initialization()
     _map["added_to_group"] = AddedToGroup;
     _map["file"] = File;
     _map["group_file"] = GroupFile;
+    _map["group_is_typing"] = GroupIsTyping;
     _map["set_name"] = SetName;
     _map["audio"] = AudioMessage;
-    _map["save_data"] = SaveData;
     _map["client_new_name"] = ClientNewName;
-    _map["save_message"] = SaveMessage;
     _map["new_password_request"] = NewPasswordRequest;
     _map["update_password"] = UpdatePassword;
     _map["delete_message"] = DeleteMessage;
     _map["delete_group_message"] = DeleteGroupMessage;
-    _map["group_is_typing"] = GroupIsTyping;
     _map["group_audio"] = GroupAudio;
     _map["new_group_member"] = NewGroupMember;
     _map["remove_group_member"] = RemoveGroupMember;
-    _map["request_data"] = RequestData;
     _map["delete_account"] = DeleteAccount;
     _map["last_message_read"] = LastMessageRead;
     _map["group_last_message_read"] = GroupLastMessageRead;
