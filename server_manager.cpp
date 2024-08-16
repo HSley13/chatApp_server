@@ -105,7 +105,7 @@ void server_manager::sign_up(const int &phone_number, const QString &first_name,
     bool succeeded_or_failed = Account::insert_document(_chatAppDB, "accounts", json_object);
 
     QJsonObject response_object{{"type", "sign_up"},
-                                {"status", succeeded_or_failed ? "succeeded" : "failed"},
+                                {"status", succeeded_or_failed},
                                 {"message", succeeded_or_failed ? "Account Created Successfully" : "Failed to Create Account, try again"}};
 
     QJsonDocument response_doc(response_object);
@@ -124,7 +124,7 @@ void server_manager::login_request(const int &phone_number, const QString &passw
     if (json_doc.isEmpty())
     {
         QJsonObject json_message{{"type", "login_request"},
-                                 {"status", "failed"},
+                                 {"status", false},
                                  {"message", "Account Doesn't exist in our Database, verify and try again"}};
 
         QJsonDocument json_doc(json_message);
@@ -137,7 +137,7 @@ void server_manager::login_request(const int &phone_number, const QString &passw
     if (!Security::verifying_password(password, json_doc.object()["hashed_password"].toString()))
     {
         QJsonObject json_message{{"type", "login_request"},
-                                 {"status", "failed"},
+                                 {"status", false},
                                  {"message", "Password Incorrect"}};
 
         QJsonDocument json_doc(json_message);
@@ -163,7 +163,7 @@ void server_manager::login_request(const int &phone_number, const QString &passw
     QJsonDocument groups = Account::find_document(_chatAppDB, "groups", group_filter);
 
     QJsonObject message{{"type", "login_request"},
-                        {"status", "succeeded"},
+                        {"status", true},
                         {"message", "loading your data..."},
                         {"my_info", json_doc.object()},
                         {"contacts", QJsonValue::fromVariant(contacts.toVariant())},
@@ -443,6 +443,8 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
 
 void server_manager::group_text_received(const int &groupID, QString sender_name, const QString &message, const QString &time)
 {
+    qDebug() << "group text";
+
     QJsonObject filter_object{{"_id", groupID}};
 
     QJsonObject message_obj{{"type", "group_text"},
