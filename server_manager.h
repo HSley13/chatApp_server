@@ -30,6 +30,7 @@ public:
     void group_file_received(const int &groupID, const QString &sender_name, const QString &file_name, const QString &file_data, const QString &time);
     void is_typing_received(const int &receiver);
     void group_is_typing_received(const int &groupID);
+    void update_info_received(const QString &first_name, const QString &last_name, const QString &password);
 
 private slots:
     void on_new_connection();
@@ -71,12 +72,12 @@ private:
         LookupFriend,
         NewGroup,
         AddedToGroup,
+        GroupIsTyping,
+        UpdateInfo,
         AudioMessage,
         NewPasswordRequest,
-        UpdatePassword,
         DeleteMessage,
         DeleteGroupMessage,
-        GroupIsTyping,
         GroupAudio,
         NewGroupMember,
         RemoveGroupMember,

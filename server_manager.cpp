@@ -369,16 +369,17 @@ void server_manager::profile_image_deleted()
 
 void server_manager::text_received(const int &receiver, const QString &message, const QString &time, const int &chat_ID)
 {
+    QJsonObject message_obj{{"type", "text"},
+                            {"chatID", chat_ID},
+                            {"sender_ID", _clients.key(_socket)},
+                            {"message", message},
+                            {"time", time}};
+
+    _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+
     QWebSocket *client = _clients.value(receiver);
     if (client)
-    {
-        QJsonObject message_obj{{"type", "text"},
-                                {"message", message},
-                                {"chatID", chat_ID},
-                                {"time", time}};
-
         client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
-    }
 
     QJsonObject filter_object{{"_id", chat_ID}};
 
@@ -454,9 +455,6 @@ void server_manager::group_text_received(const int &groupID, QString sender_name
     QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
     for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
     {
-        if (phone_number.toInt() == _clients.key(_socket))
-            continue;
-
         QWebSocket *client = _clients.value(phone_number.toInt());
         if (client)
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
@@ -572,6 +570,30 @@ void server_manager::group_is_typing_received(const int &groupID)
     }
 }
 
+void server_manager::update_info_received(const QString &first_name, const QString &last_name, const QString &password)
+{
+    const QString &hashed_password = Security::hashing_password(password);
+
+    QJsonObject filter_object{{"_id", _clients.key(_socket)}};
+    QJsonObject update_field{{"$set", QJsonObject{{"first_name", first_name}, {"last_name", last_name}, {"hashed_password", hashed_password}}}};
+    Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
+
+    QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, _clients.key(_socket));
+    for (const QJsonValue &ID : contactIDs)
+    {
+        QWebSocket *client = _clients.value(ID.toInt());
+        if (client)
+        {
+            QJsonObject message2{{"type", "update_info"},
+                                 {"phone_number", _clients.key(_socket)},
+                                 {"first_name", first_name},
+                                 {"last_name", last_name}};
+
+            client->sendTextMessage(QString::fromUtf8(QJsonDocument(message2).toJson()));
+        };
+    }
+}
+
 void server_manager::on_text_message_received(const QString &message)
 {
     QJsonDocument json_doc = QJsonDocument::fromJson(message.toUtf8());
@@ -625,6 +647,8 @@ void server_manager::on_text_message_received(const QString &message)
     case GroupIsTyping:
         group_is_typing_received(json_object["groupID"].toInt());
         break;
+    case UpdateInfo:
+        update_info_received(json_object["first_name"].toString(), json_object["last_name"].toString(), json_object["password"].toString());
         break;
     case AudioMessage:
         break;
@@ -637,8 +661,6 @@ void server_manager::on_text_message_received(const QString &message)
     case ClientConnected:
         break;
     case NewPasswordRequest:
-        break;
-    case UpdatePassword:
         break;
     case DeleteMessage:
         break;
@@ -680,11 +702,11 @@ void server_manager::map_initialization()
     _map["file"] = File;
     _map["group_file"] = GroupFile;
     _map["group_is_typing"] = GroupIsTyping;
+    _map["update_info"] = UpdateInfo;
     _map["set_name"] = SetName;
     _map["audio"] = AudioMessage;
     _map["client_new_name"] = ClientNewName;
     _map["new_password_request"] = NewPasswordRequest;
-    _map["update_password"] = UpdatePassword;
     _map["delete_message"] = DeleteMessage;
     _map["delete_group_message"] = DeleteGroupMessage;
     _map["group_audio"] = GroupAudio;
