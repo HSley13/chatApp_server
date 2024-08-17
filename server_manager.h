@@ -6,7 +6,6 @@
 #include <QTime>
 
 #include "database.h"
-
 class server_manager : public QObject
 {
     Q_OBJECT
@@ -33,6 +32,7 @@ public:
     void update_info_received(const QString &first_name, const QString &last_name, const QString &password);
     void update_password(const int &phone_number, const QString &password);
     void retrieve_question(const int &phone_number);
+    void remove_group_member(const int &groupID, QJsonArray group_members);
 
 private slots:
     void on_new_connection();
@@ -59,7 +59,6 @@ private:
     {
         SignUp = Qt::UserRole + 1,
         IsTyping,
-        SetName,
         ProfileImage,
         GroupProfileImage,
         ProfileImageDeleted,
@@ -68,7 +67,6 @@ private:
         GroupFile,
         GroupText,
         LoginRequest,
-        ClientNewName,
         ClientDisconnected,
         ClientConnected,
         LookupFriend,
@@ -78,13 +76,12 @@ private:
         UpdateInfo,
         UpdatePassword,
         RetrieveQuestion,
-        AudioMessage,
-        NewPasswordRequest,
+        RemoveGroupMember,
+        NewGroupMember,
+        Audio,
+        GroupAudio,
         DeleteMessage,
         DeleteGroupMessage,
-        GroupAudio,
-        NewGroupMember,
-        RemoveGroupMember,
         DeleteAccount,
         LastMessageRead,
         GroupLastMessageRead,

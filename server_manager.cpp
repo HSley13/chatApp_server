@@ -618,6 +618,32 @@ void server_manager::retrieve_question(const int &phone_number)
     _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
 }
 
+void server_manager::remove_group_member(const int &groupID, QJsonArray group_members)
+{
+    QJsonObject filter_object{{"_id", groupID}};
+
+    QJsonObject pull_elements{{"$in", group_members}};
+    QJsonObject pull_object{{"group_members", pull_elements}};
+
+    QJsonObject update_object{{"$pull", pull_object}};
+
+    Account::update_document(_chatAppDB, "groups", filter_object, update_object);
+
+    QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
+    for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
+    {
+        QWebSocket *client = _clients.value(phone_number.toInt());
+        if (client)
+        {
+            QJsonObject message_obj{{"type", "remove_group_member"},
+                                    {"groupID", groupID},
+                                    {"group_members", group_members}};
+
+            client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+        }
+    }
+}
+
 void server_manager::on_text_message_received(const QString &message)
 {
     QJsonDocument json_doc = QJsonDocument::fromJson(message.toUtf8());
@@ -680,17 +706,8 @@ void server_manager::on_text_message_received(const QString &message)
     case RetrieveQuestion:
         retrieve_question(json_object["phone_number"].toInt());
         break;
-    case AudioMessage:
-        break;
-    case SetName:
-        break;
-    case ClientNewName:
-        break;
-    case ClientDisconnected:
-        break;
-    case ClientConnected:
-        break;
-    case NewPasswordRequest:
+    case RemoveGroupMember:
+        remove_group_member(json_object["groupID"].toInt(), json_object["group_members"].toArray());
         break;
     case DeleteMessage:
         break;
@@ -699,8 +716,6 @@ void server_manager::on_text_message_received(const QString &message)
     case GroupAudio:
         break;
     case NewGroupMember:
-        break;
-    case RemoveGroupMember:
         break;
     case DeleteAccount:
         break;
@@ -735,15 +750,12 @@ void server_manager::map_initialization()
     _map["contact_info_updated"] = UpdateInfo;
     _map["update_password"] = UpdatePassword;
     _map["retrieve_question"] = RetrieveQuestion;
-    _map["set_name"] = SetName;
-    _map["audio"] = AudioMessage;
-    _map["client_new_name"] = ClientNewName;
-    _map["new_password_request"] = NewPasswordRequest;
+    _map["remove_group_member"] = RemoveGroupMember;
+    _map["new_group_member"] = NewGroupMember;
+    _map["audio"] = Audio;
     _map["delete_message"] = DeleteMessage;
     _map["delete_group_message"] = DeleteGroupMessage;
     _map["group_audio"] = GroupAudio;
-    _map["new_group_member"] = NewGroupMember;
-    _map["remove_group_member"] = RemoveGroupMember;
     _map["delete_account"] = DeleteAccount;
     _map["last_message_read"] = LastMessageRead;
     _map["group_last_message_read"] = GroupLastMessageRead;
