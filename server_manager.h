@@ -33,6 +33,7 @@ public:
     void update_password(const int &phone_number, const QString &password);
     void retrieve_question(const int &phone_number);
     void remove_group_member(const int &groupID, QJsonArray group_members);
+    void add_group_member(const int &groupID, QJsonArray group_members);
 
 private slots:
     void on_new_connection();
@@ -77,7 +78,7 @@ private:
         UpdatePassword,
         RetrieveQuestion,
         RemoveGroupMember,
-        NewGroupMember,
+        AddGroupMember,
         Audio,
         GroupAudio,
         DeleteMessage,
