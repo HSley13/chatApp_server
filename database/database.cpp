@@ -287,6 +287,7 @@ QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const in
                        << "status" << "$contactInfo.status"
                        << "image_url" << "$contactInfo.image_url"
                        << "chatID" << "$contacts.chatID"
+                       << "unread_count" << "$contacts.unread_count"
                        << bsoncxx::builder::stream::close_document
                        << "messages" << bsoncxx::builder::stream::open_document
                        << "$push" << "$chatMessages.messages"
@@ -303,6 +304,7 @@ QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const in
                          << "image_url" << "$_id.image_url"
                          << bsoncxx::builder::stream::close_document
                          << "chatID" << "$_id.chatID"
+                         << "unread_count" << "$_id.unread_count"
                          << "chatMessages" << "$messages"
                          << bsoncxx::builder::stream::finalize);
 

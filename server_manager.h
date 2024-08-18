@@ -28,12 +28,15 @@ public:
     void file_received(const int &chatID, const int &receiver, const QString &file_name, const QString &file_data, const QString &time);
     void group_file_received(const int &groupID, const QString &sender_name, const QString &file_name, const QString &file_data, const QString &time);
     void is_typing_received(const int &receiver);
-    void group_is_typing_received(const int &groupID);
+    void group_is_typing_received(const int &groupID, const QString &sender_name);
     void update_info_received(const QString &first_name, const QString &last_name, const QString &password);
     void update_password(const int &phone_number, const QString &password);
     void retrieve_question(const int &phone_number);
     void remove_group_member(const int &groupID, QJsonArray group_members);
     void add_group_member(const int &groupID, QJsonArray group_members);
+    void delete_message(const int &receiver, const int &chat_ID, const QString &full_time);
+    void delete_group_message(const int &groupID, const QString &full_time);
+    void update_unread_message(const int &chatID);
 
 private slots:
     void on_new_connection();
@@ -83,9 +86,9 @@ private:
         GroupAudio,
         DeleteMessage,
         DeleteGroupMessage,
+        UpdateUnreadMessage,
+        UpdateGroupUnreadMessage,
         DeleteAccount,
-        LastMessageRead,
-        GroupLastMessageRead,
         InvalidType
     };
     static QHash<QString, MessageType> _map;
