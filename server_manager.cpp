@@ -157,10 +157,7 @@ void server_manager::login_request(const int &phone_number, const QString &passw
     Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
 
     QJsonDocument contacts = Account::fetch_contacts_and_chats(_chatAppDB, phone_number);
-
-    QJsonArray groups_array = json_doc.object()["groups"].toArray();
-    QJsonObject group_filter{{"_id", QJsonObject{{"$in", groups_array}}}};
-    QJsonDocument groups = Account::find_document(_chatAppDB, "groups", group_filter);
+    QJsonDocument groups = Account::fetch_groups_and_chats(_chatAppDB, phone_number);
 
     QJsonObject message{{"type", "login_request"},
                         {"status", true},
@@ -222,7 +219,7 @@ void server_manager::lookup_friend(const int &phone_number)
 
     QJsonObject push_object{{"contacts", QJsonObject{{"contactID", _clients.key(_socket)},
                                                      {"chatID", chatID},
-                                                     {"unread_count", 1}}}};
+                                                     {"unread_messages", 1}}}};
     QJsonObject update_object{{"$push", push_object}};
     Account::update_document(_chatAppDB, "accounts", filter_object, update_object);
 
@@ -233,9 +230,7 @@ void server_manager::lookup_friend(const int &phone_number)
     messages_array.append(first_message);
 
     QJsonObject insert_object{{"_id", chatID},
-                              {"unread_message", QJsonArray()},
                               {"messages", messages_array}};
-
     Account::insert_document(_chatAppDB, "chats", insert_object);
 
     QWebSocket *client = _clients.value(phone_number);
@@ -266,7 +261,7 @@ void server_manager::lookup_friend(const int &phone_number)
 
     push_object["contacts"] = QJsonObject{{"contactID", phone_number},
                                           {"chatID", chatID},
-                                          {"unread_count", 1}};
+                                          {"unread_messages", 1}};
     update_object["$push"] = push_object;
 
     Account::update_document(_chatAppDB, "accounts", filter_object, update_object);
@@ -342,7 +337,7 @@ void server_manager::group_profile_image(const int &group_ID, const QString &fil
                         {"group_image_url", QString::fromStdString(url)}};
 
     QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
-    for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
+    for (const QJsonValue &phone_number : json_doc.object().value("group_members").toArray())
     {
         QWebSocket *client = _clients.value(phone_number.toInt());
         if (client)
@@ -387,20 +382,17 @@ void server_manager::text_received(const int &receiver, const QString &message, 
 
     QJsonObject filter_object{{"_id", chat_ID}};
 
-    QJsonObject push_field{{"message", message},
-                           {"sender", _clients.key(_socket)},
-                           {"time", time}};
-
-    QJsonObject push_object{{"messages", push_field}};
+    QJsonObject push_object{{"messages", QJsonObject{{"message", message},
+                                                     {"sender", _clients.key(_socket)},
+                                                     {"time", time}}}};
 
     QJsonObject update_object{{"$push", push_object}};
-
     Account::update_document(_chatAppDB, "chats", filter_object, update_object);
 
-    QJsonObject account_filter{{"_id", receiver}, {"contacts.chatID", chat_ID}};
-    QJsonObject increment_object{{"$inc", QJsonObject{{"contacts.$.unread_count", 1}}}};
+    QJsonObject filter_object2{{"_id", receiver}, {"contacts.chatID", chat_ID}};
+    QJsonObject increment_object{{"$inc", QJsonObject{{"contacts.$.unread_messages", 1}}}};
 
-    Account::update_document(_chatAppDB, "accounts", account_filter, increment_object);
+    Account::update_document(_chatAppDB, "accounts", filter_object2, increment_object);
 }
 
 void server_manager::new_group(const QString &group_name, QJsonArray group_members)
@@ -420,9 +412,20 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
 
     Account::insert_document(_chatAppDB, "groups", new_group);
 
-    QJsonObject push_object{{"groups", groupID}};
-    QJsonObject update_object{{"$push", push_object}};
+    QJsonArray messages_array;
+    QJsonObject first_message{{"message", "New Group Created"},
+                              {"sender_ID", groupID},
+                              {"sender_name", "Server"},
+                              {"time", QDateTime::currentDateTimeUtc().toString()}};
+    messages_array.append(first_message);
 
+    QJsonObject insert_object{{"_id", groupID},
+                              {"group_messages", messages_array}};
+    Account::insert_document(_chatAppDB, "groups", insert_object);
+
+    QJsonObject push_object{{"groups", QJsonObject{{"groupID", groupID},
+                                                   {"group_unread_messages", 1}}}};
+    QJsonObject update_object{{"$push", push_object}};
     for (const QJsonValue &phone_number : group_members)
     {
         QJsonObject filter_object{{"_id", phone_number.toInt()}};
@@ -434,10 +437,10 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
             QJsonObject group_info{{"_id", groupID},
                                    {"group_name", group_name},
                                    {"group_admin", _clients.key(_socket)},
-                                   {"group_messages", QJsonArray{}},
+                                   {"group_messages", messages_array},
                                    {"group_members", group_members},
                                    {"group_image_url", "https://slays3.s3.amazonaws.com/networking.png"},
-                                   {"unread_messages", 1}};
+                                   {"group_unread_messages", 1}};
 
             QJsonArray groups;
             groups.append(group_info);
@@ -461,23 +464,25 @@ void server_manager::group_text_received(const int &groupID, QString sender_name
                             {"message", message},
                             {"time", time}};
 
+    QJsonObject increment_object{{"$inc", QJsonObject{{"groups.$.group_unread_messages", 1}}}};
+
     QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
-    for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
+    for (const QJsonValue &phone_number : json_doc.object().value("group_members").toArray())
     {
+        QJsonObject account_filter{{"_id", phone_number.toInt()}, {"groups.groupID", groupID}};
+        Account::update_document(_chatAppDB, "accounts", account_filter, increment_object);
+
         QWebSocket *client = _clients.value(phone_number.toInt());
         if (client)
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
     }
 
-    QJsonObject push_field{{"message", message},
-                           {"sender_ID", _clients.key(_socket)},
-                           {"sender_name", sender_name},
-                           {"time", time}};
-
-    QJsonObject push_object{{"group_messages", push_field}};
+    QJsonObject push_object{{"group_messages", QJsonObject{{"message", message},
+                                                           {"sender_ID", _clients.key(_socket)},
+                                                           {"sender_name", sender_name},
+                                                           {"time", time}}}};
 
     QJsonObject update_object{{"$push", push_object}};
-
     Account::update_document(_chatAppDB, "groups", filter_object, update_object);
 }
 
@@ -509,6 +514,11 @@ void server_manager::file_received(const int &chatID, const int &receiver, const
     QJsonObject update_object{{"$push", push_object}};
 
     Account::update_document(_chatAppDB, "chats", filter_object, update_object);
+
+    QJsonObject account_filter{{"_id", receiver}, {"contacts.chatID", chatID}};
+    QJsonObject increment_object{{"$inc", QJsonObject{{"contacts.$.unread_messages", 1}}}};
+
+    Account::update_document(_chatAppDB, "accounts", account_filter, increment_object);
 }
 
 void server_manager::group_file_received(const int &groupID, const QString &sender_name, const QString &file_name, const QString &file_data, const QString &time)
@@ -527,23 +537,22 @@ void server_manager::group_file_received(const int &groupID, const QString &send
                             {"file_url", QString::fromStdString(file_url)},
                             {"time", time}};
 
+    QJsonObject increment_object{{"$inc", QJsonObject{{"groups.$.group_unread_messages", 1}}}};
+
     QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
-    for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
+    for (const QJsonValue &phone_number : json_doc.object().value("group_members").toArray())
     {
         QWebSocket *client = _clients.value(phone_number.toInt());
         if (client)
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
     }
 
-    QJsonObject push_field{{"file_url", QString::fromStdString(file_url)},
-                           {"sender_ID", _clients.key(_socket)},
-                           {"sender_name", sender_name},
-                           {"time", time}};
-
-    QJsonObject push_object{{"group_messages", push_field}};
+    QJsonObject push_object{{"group_messages", QJsonObject{{"file_url", QString::fromStdString(file_url)},
+                                                           {"sender_ID", _clients.key(_socket)},
+                                                           {"sender_name", sender_name},
+                                                           {"time", time}}}};
 
     QJsonObject update_object{{"$push", push_object}};
-
     Account::update_document(_chatAppDB, "groups", filter_object, update_object);
 }
 
@@ -568,7 +577,7 @@ void server_manager::group_is_typing_received(const int &groupID, const QString 
                             {"sender_name", sender_name}};
 
     QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
-    for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
+    for (const QJsonValue &phone_number : json_doc.object().value("group_members").toArray())
     {
         if (phone_number.toInt() == _clients.key(_socket))
             continue;
@@ -584,7 +593,9 @@ void server_manager::update_info_received(const QString &first_name, const QStri
     const QString &hashed_password = Security::hashing_password(password);
 
     QJsonObject filter_object{{"_id", _clients.key(_socket)}};
-    QJsonObject update_field{{"$set", QJsonObject{{"first_name", first_name}, {"last_name", last_name}, {"hashed_password", hashed_password}}}};
+    QJsonObject update_field{{"$set", QJsonObject{{"first_name", first_name},
+                                                  {"last_name", last_name},
+                                                  {"hashed_password", hashed_password}}}};
     Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
 
     QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, _clients.key(_socket));
@@ -636,13 +647,16 @@ void server_manager::remove_group_member(const int &groupID, QJsonArray group_me
 
     for (const QJsonValue &phone_number : group_members)
     {
-        QJsonObject filter_object2{{"_id", phone_number.toInt()}};
+        QJsonObject filter_object2{{"_id", phone_number}};
 
-        QJsonObject pull_object2{{"groups", groupID}};
+        QJsonObject pull_object2{{"groups", QJsonObject{{"groupID", groupID}}}};
         QJsonObject update_object2{{"$pull", pull_object2}};
+
         Account::update_document(_chatAppDB, "accounts", filter_object2, update_object2);
+        QString message = QString("You have been removed from the group: %1").arg(QString::number(groupID));
 
         QJsonObject message_obj{{"type", "removed_from_group"},
+                                {"message", message},
                                 {"groupID", groupID}};
 
         QWebSocket *client = _clients.value(phone_number.toInt());
@@ -653,7 +667,7 @@ void server_manager::remove_group_member(const int &groupID, QJsonArray group_me
     Account::update_document(_chatAppDB, "accounts", filter_object, update_object);
 
     QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
-    for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
+    for (const QJsonValue &phone_number : json_doc.object().value("group_members").toArray())
     {
         QWebSocket *client = _clients.value(phone_number.toInt());
         if (client)
@@ -671,10 +685,9 @@ void server_manager::add_group_member(const int &groupID, QJsonArray group_membe
 {
     QJsonObject filter_object{{"_id", groupID}};
 
-    QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object,
-                                                    QJsonObject{{"_id", 0}, {"group_members", 1}});
+    QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
 
-    QJsonArray current_group_members = json_doc.array().first().toObject().value("group_members").toArray();
+    QJsonArray current_group_members = json_doc.object().value("group_members").toArray();
     for (const QJsonValue &phone_number : current_group_members)
     {
         QWebSocket *client = _clients.value(phone_number.toInt());
@@ -695,13 +708,14 @@ void server_manager::add_group_member(const int &groupID, QJsonArray group_membe
     Account::update_document(_chatAppDB, "groups", filter_object, update_object);
 
     QJsonDocument updated_group_doc = Account::find_document(_chatAppDB, "groups", filter_object);
-    QJsonObject updated_group = updated_group_doc.array().first().toObject();
+    QJsonObject updated_group = updated_group_doc.object();
 
     for (const QJsonValue &phone_number : group_members)
     {
         QJsonObject filter_object2{{"_id", phone_number.toInt()}};
 
-        QJsonObject push_object2{{"groups", groupID}};
+        QJsonObject push_object2{{"groups", QJsonObject{{"groupID", groupID},
+                                                        {"group_unread_messages", 1}}}};
         QJsonObject update_object2{{"$push", push_object2}};
         Account::update_document(_chatAppDB, "accounts", filter_object2, update_object2);
 
@@ -729,10 +743,9 @@ void server_manager::add_group_member(const int &groupID, QJsonArray group_membe
 
 void server_manager::delete_message(const int &receiver, const int &chat_ID, const QString &full_time)
 {
-    QJsonObject message_obj{
-        {"type", "delete_message"},
-        {"chatID", chat_ID},
-        {"full_time", full_time}};
+    QJsonObject message_obj{{"type", "delete_message"},
+                            {"chatID", chat_ID},
+                            {"full_time", full_time}};
 
     _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
 
@@ -757,7 +770,7 @@ void server_manager::delete_group_message(const int &groupID, const QString &ful
                             {"full_time", full_time}};
 
     QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
-    for (const QJsonValue &phone_number : json_doc.array().first().toObject().value("group_members").toArray())
+    for (const QJsonValue &phone_number : json_doc.object().value("group_members").toArray())
     {
         QWebSocket *client = _clients.value(phone_number.toInt());
         if (client)
@@ -775,7 +788,17 @@ void server_manager::update_unread_message(const int &chatID)
     QJsonObject filter_object{{"_id", _clients.key(_socket)},
                               {"contacts.chatID", chatID}};
 
-    QJsonObject update_object{{"$set", QJsonObject{{"contacts.$.unread_count", 0}}}};
+    QJsonObject update_object{{"$set", QJsonObject{{"contacts.$.unread_messages", 0}}}};
+
+    Account::update_document(_chatAppDB, "accounts", filter_object, update_object);
+}
+
+void server_manager::update_group_unread_message(const int &groupID)
+{
+    QJsonObject filter_object{{"_id", _clients.key(_socket)},
+                              {"groups.groupID", groupID}};
+
+    QJsonObject update_object{{"$set", QJsonObject{{"groups.$.group_unread_messages", 0}}}};
 
     Account::update_document(_chatAppDB, "accounts", filter_object, update_object);
 }
@@ -858,6 +881,7 @@ void server_manager::on_text_message_received(const QString &message)
         update_unread_message(json_object["chatID"].toInt());
         break;
     case UpdateGroupUnreadMessage:
+        update_group_unread_message(json_object["groupID"].toInt());
         break;
     case DeleteAccount:
         break;

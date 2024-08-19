@@ -49,6 +49,8 @@ public:
 
     static QJsonDocument fetch_contacts_and_chats(mongocxx::database &db, const int &account_id);
 
+    static QJsonDocument fetch_groups_and_chats(mongocxx::database &db, const int &account_id);
+
     static QJsonArray fetch_contactIDs(mongocxx::database &db, const int &account_id);
 };
 

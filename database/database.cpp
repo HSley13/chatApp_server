@@ -226,9 +226,6 @@ QJsonDocument Account::find_document(mongocxx::database &db, const std::string &
         if (result_array.isEmpty())
             return QJsonDocument();
 
-        if (!collection_name.compare("groups"))
-            return QJsonDocument(result_array);
-
         return (result_array.size() == 1) ? QJsonDocument(result_array.first().toObject()) : QJsonDocument(result_array);
     }
     catch (const mongocxx::exception &e)
@@ -287,7 +284,7 @@ QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const in
                        << "status" << "$contactInfo.status"
                        << "image_url" << "$contactInfo.image_url"
                        << "chatID" << "$contacts.chatID"
-                       << "unread_count" << "$contacts.unread_count"
+                       << "unread_messages" << "$contacts.unread_messages"
                        << bsoncxx::builder::stream::close_document
                        << "messages" << bsoncxx::builder::stream::open_document
                        << "$push" << "$chatMessages.messages"
@@ -304,8 +301,67 @@ QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const in
                          << "image_url" << "$_id.image_url"
                          << bsoncxx::builder::stream::close_document
                          << "chatID" << "$_id.chatID"
-                         << "unread_count" << "$_id.unread_count"
+                         << "unread_messages" << "$_id.unread_messages"
                          << "chatMessages" << "$messages"
+                         << bsoncxx::builder::stream::finalize);
+
+        mongocxx::cursor cursor = collection.aggregate(pipeline);
+
+        QJsonArray result_array;
+        for (const bsoncxx::document::view &doc : cursor)
+        {
+            QString json_string = QString::fromStdString(bsoncxx::to_json(doc));
+            QJsonDocument json_doc = QJsonDocument::fromJson(json_string.toUtf8());
+
+            if (!json_doc.isNull())
+                result_array.append(json_doc.object());
+        }
+
+        return result_array.isEmpty() ? QJsonDocument() : QJsonDocument(result_array);
+    }
+    catch (const mongocxx::exception &e)
+    {
+        std::cerr << "MongoDB Exception: " << e.what() << std::endl;
+        return QJsonDocument();
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "std Exception: " << e.what() << std::endl;
+        return QJsonDocument();
+    }
+}
+
+QJsonDocument Account::fetch_groups_and_chats(mongocxx::database &db, const int &account_id)
+{
+    try
+    {
+        mongocxx::collection collection = db.collection("accounts");
+
+        mongocxx::pipeline pipeline{};
+
+        pipeline.match(bsoncxx::builder::stream::document{}
+                       << "_id" << bsoncxx::types::b_int64{static_cast<int64_t>(account_id)}
+                       << bsoncxx::builder::stream::finalize);
+
+        pipeline.unwind("$groups");
+
+        pipeline.lookup(bsoncxx::builder::stream::document{}
+                        << "from" << "groups"
+                        << "localField" << "groups.groupID"
+                        << "foreignField" << "_id"
+                        << "as" << "groupInfo"
+                        << bsoncxx::builder::stream::finalize);
+
+        pipeline.unwind("$groupInfo");
+
+        pipeline.project(bsoncxx::builder::stream::document{}
+                         << "_id" << "$groupInfo._id"
+                         << "group_name" << "$groupInfo.group_name"
+                         << "group_unread_messages" << "$groups.group_unread_messages"
+                         << "group_image_url" << "$groupInfo.group_image_url"
+                         << "group_admin" << "$groupInfo.group_admin"
+                         << "group_members" << "$groupInfo.group_members"
+                         << "group_messages" << "$groupInfo.group_messages"
                          << bsoncxx::builder::stream::finalize);
 
         mongocxx::cursor cursor = collection.aggregate(pipeline);
