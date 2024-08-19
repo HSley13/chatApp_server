@@ -449,3 +449,72 @@ QJsonArray Account::fetch_contactIDs(mongocxx::database &db, const int &account_
         return QJsonArray();
     }
 }
+
+void Account::delete_account(mongocxx::database &db, const int &account_id)
+{
+    try
+    {
+        mongocxx::collection account_collection = db["accounts"];
+        mongocxx::collection group_collection = db["groups"];
+        mongocxx::collection chats_collection = db["chats"];
+
+        bsoncxx::stdx::optional<bsoncxx::document::value> account_doc = account_collection.find_one(
+            bsoncxx::builder::stream::document{} << "_id" << account_id << bsoncxx::builder::stream::finalize);
+
+        if (!account_doc)
+        {
+            std::cerr << "Account not found." << std::endl;
+            return;
+        }
+
+        bsoncxx::document::view account_view = account_doc->view();
+
+        bsoncxx::array::view groups = account_view["groups"].get_array().value;
+        for (bsoncxx::array::element group : groups)
+        {
+            int groupID = group["groupID"].get_int32();
+
+            group_collection.update_one(
+                bsoncxx::builder::stream::document{} << "_id" << groupID << bsoncxx::builder::stream::finalize,
+                bsoncxx::builder::stream::document{} << "$pull" << bsoncxx::builder::stream::open_document
+                                                     << "group_members" << account_id
+                                                     << bsoncxx::builder::stream::close_document << bsoncxx::builder::stream::finalize);
+        }
+
+        bsoncxx::array::view contacts = account_view["contacts"].get_array().value;
+        for (bsoncxx::array::element contact : contacts)
+        {
+            int chatID = contact["chatID"].get_int32();
+
+            account_collection.update_many(
+                bsoncxx::builder::stream::document{} << "contacts.chatID" << chatID << bsoncxx::builder::stream::finalize,
+                bsoncxx::builder::stream::document{} << "$pull" << bsoncxx::builder::stream::open_document
+                                                     << "contacts" << bsoncxx::builder::stream::open_document
+                                                     << "chatID" << chatID
+                                                     << bsoncxx::builder::stream::close_document
+                                                     << bsoncxx::builder::stream::close_document << bsoncxx::builder::stream::finalize);
+        }
+
+        for (bsoncxx::array::element contact : contacts)
+        {
+            int chatID = contact["chatID"].get_int32();
+
+            chats_collection.delete_one(
+                bsoncxx::builder::stream::document{} << "_id" << chatID << bsoncxx::builder::stream::finalize);
+        }
+
+        // Finally, delete the account itself
+        account_collection.delete_one(
+            bsoncxx::builder::stream::document{} << "_id" << account_id << bsoncxx::builder::stream::finalize);
+
+        std::cout << "Account, associated group memberships, and chats deleted successfully." << std::endl;
+    }
+    catch (const mongocxx::exception &e)
+    {
+        std::cerr << "MongoDB Exception: " << e.what() << std::endl;
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "std Exception: " << e.what() << std::endl;
+    }
+}

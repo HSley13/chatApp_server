@@ -38,6 +38,7 @@ public:
     void delete_group_message(const int &groupID, const QString &full_time);
     void update_unread_message(const int &chatID);
     void update_group_unread_message(const int &groupID);
+    void delete_account();
 
 private slots:
     void on_new_connection();

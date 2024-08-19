@@ -100,7 +100,7 @@ void server_manager::sign_up(const int &phone_number, const QString &first_name,
 
     QJsonObject response_object{{"type", "sign_up"},
                                 {"status", succeeded_or_failed},
-                                {"message", succeeded_or_failed ? "Account Created Successfully" : "Failed to Create Account, try again"}};
+                                {"message", succeeded_or_failed ? "Account Created Successfully, Reconnect" : "Failed to Create Account, try again"}};
 
     QJsonDocument response_doc(response_object);
 
@@ -797,6 +797,11 @@ void server_manager::update_group_unread_message(const int &groupID)
     Account::update_document(_chatAppDB, "accounts", filter_object, update_object);
 }
 
+void server_manager::delete_account()
+{
+    Account::delete_account(_chatAppDB, _clients.key(_socket));
+}
+
 void server_manager::on_text_message_received(const QString &message)
 {
     QJsonDocument json_doc = QJsonDocument::fromJson(message.toUtf8());
@@ -878,6 +883,7 @@ void server_manager::on_text_message_received(const QString &message)
         update_group_unread_message(json_object["groupID"].toInt());
         break;
     case DeleteAccount:
+        delete_account();
         break;
     case Audio:
         break;
