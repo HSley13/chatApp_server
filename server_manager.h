@@ -12,7 +12,7 @@ class server_manager : public QObject
 
 public:
     server_manager(const QString &URI_string, QObject *parent = nullptr);
-    server_manager(QWebSocket *client, QObject *parent = nullptr);
+    server_manager(std::shared_ptr<QWebSocket> client, QObject *parent = nullptr);
     ~server_manager();
 
     void sign_up(const int &phone_number, const QString &first_name, const QString &last_name, const QString &password, const QString &secret_question, const QString &secret_answer);
@@ -46,10 +46,10 @@ private slots:
 
 private:
     QWebSocketServer *_server{nullptr};
-    QWebSocket *_socket{nullptr};
+    std::shared_ptr<QWebSocket> _socket{nullptr};
 
     static mongocxx::database _chatAppDB;
-    static QHash<int, QWebSocket *> _clients;
+    static QHash<int, std::shared_ptr<QWebSocket>> _clients;
     static QHash<int, QString> _time_zone;
 
     static Aws::SDKOptions _options;

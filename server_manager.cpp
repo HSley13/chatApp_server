@@ -1,6 +1,6 @@
 #include "server_manager.h"
 
-QHash<int, QWebSocket *> server_manager::_clients;
+QHash<int, std::shared_ptr<QWebSocket>> server_manager::_clients;
 QHash<int, QString> server_manager::_time_zone;
 mongocxx::database server_manager::_chatAppDB;
 QHash<QString, server_manager::MessageType> server_manager::_map;
@@ -38,22 +38,16 @@ server_manager::server_manager(const QString &URI_string, QObject *parent)
 server_manager::~server_manager()
 {
     Aws::ShutdownAPI(_options);
-
-    if (!_clients.isEmpty())
-    {
-        for (QWebSocket *cl : _clients)
-            delete cl;
-    }
 }
 
-server_manager::server_manager(QWebSocket *client, QObject *parent)
-    : QObject(parent), _socket(client) { connect(_socket, &QWebSocket::textMessageReceived, this, &server_manager::on_text_message_received); }
+server_manager::server_manager(std::shared_ptr<QWebSocket> client, QObject *parent)
+    : QObject(parent), _socket(client) { connect(_socket.get(), &QWebSocket::textMessageReceived, this, &server_manager::on_text_message_received); }
 
 void server_manager::on_new_connection()
 {
-    QWebSocket *client = _server->nextPendingConnection();
+    std::shared_ptr<QWebSocket> client(_server->nextPendingConnection());
 
-    connect(client, &QWebSocket::disconnected, this, &server_manager::on_client_disconnected);
+    connect(client.get(), &QWebSocket::disconnected, this, &server_manager::on_client_disconnected);
 
     server_manager *server = new server_manager(client, this);
 }
@@ -75,7 +69,7 @@ void server_manager::on_client_disconnected()
         QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, id);
         for (const QJsonValue &ID : contactIDs)
         {
-            QWebSocket *client = _clients.value(ID.toInt());
+            std::shared_ptr<QWebSocket> client = _clients.value(ID.toInt());
             if (client)
             {
                 QJsonObject message{{"type", "client_disconnected"},
@@ -171,7 +165,7 @@ void server_manager::login_request(const int &phone_number, const QString &passw
     QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, phone_number);
     for (const QJsonValue &ID : contactIDs)
     {
-        QWebSocket *client = _clients.value(ID.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(ID.toInt());
         if (client)
         {
             QJsonObject message{{"type", "client_connected"},
@@ -233,7 +227,7 @@ void server_manager::lookup_friend(const int &phone_number)
                               {"messages", messages_array}};
     Account::insert_document(_chatAppDB, "chats", insert_object);
 
-    QWebSocket *client = _clients.value(phone_number);
+    std::shared_ptr<QWebSocket> client = _clients.value(phone_number);
     if (client)
     {
         filter_object[QStringLiteral("_id")] = _clients.key(_socket);
@@ -309,7 +303,7 @@ void server_manager::profile_image(const QString &file_name, const QString &data
     QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, _clients.key(_socket));
     for (const QJsonValue &ID : contactIDs)
     {
-        QWebSocket *client = _clients.value(ID.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(ID.toInt());
         if (client)
         {
             QJsonObject message2{{"type", "client_profile_image"},
@@ -339,7 +333,7 @@ void server_manager::group_profile_image(const int &group_ID, const QString &fil
     QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
     for (const QJsonValue &phone_number : json_doc.object().value("group_members").toArray())
     {
-        QWebSocket *client = _clients.value(phone_number.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(phone_number.toInt());
         if (client)
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
     }
@@ -354,7 +348,7 @@ void server_manager::profile_image_deleted()
     QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, _clients.key(_socket));
     for (const QJsonValue &ID : contactIDs)
     {
-        QWebSocket *client = _clients.value(ID.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(ID.toInt());
         if (client)
         {
             QJsonObject message2{{"type", "client_profile_image"},
@@ -376,7 +370,7 @@ void server_manager::text_received(const int &receiver, const QString &message, 
 
     _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
 
-    QWebSocket *client = _clients.value(receiver);
+    std::shared_ptr<QWebSocket> client = _clients.value(receiver);
     if (client)
         client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
 
@@ -431,7 +425,7 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
         QJsonObject filter_object{{"_id", phone_number.toInt()}};
         Account::update_document(_chatAppDB, "accounts", filter_object, update_object);
 
-        QWebSocket *client = _clients.value(phone_number.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(phone_number.toInt());
         if (client)
         {
             QJsonObject group_info{{"_id", groupID},
@@ -472,7 +466,7 @@ void server_manager::group_text_received(const int &groupID, QString sender_name
         QJsonObject account_filter{{"_id", phone_number.toInt()}, {"groups.groupID", groupID}};
         Account::update_document(_chatAppDB, "accounts", account_filter, increment_object);
 
-        QWebSocket *client = _clients.value(phone_number.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(phone_number.toInt());
         if (client)
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
     }
@@ -498,7 +492,7 @@ void server_manager::file_received(const int &chatID, const int &receiver, const
                             {"sender_ID", _clients.key(_socket)},
                             {"file_url", QString::fromStdString(file_url)},
                             {"time", time}};
-    QWebSocket *client = _clients.value(receiver);
+    std::shared_ptr<QWebSocket> client = _clients.value(receiver);
     if (client)
         client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
 
@@ -542,7 +536,7 @@ void server_manager::group_file_received(const int &groupID, const QString &send
     QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
     for (const QJsonValue &phone_number : json_doc.object().value("group_members").toArray())
     {
-        QWebSocket *client = _clients.value(phone_number.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(phone_number.toInt());
         if (client)
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
     }
@@ -558,7 +552,7 @@ void server_manager::group_file_received(const int &groupID, const QString &send
 
 void server_manager::is_typing_received(const int &receiver)
 {
-    QWebSocket *client = _clients.value(receiver);
+    std::shared_ptr<QWebSocket> client = _clients.value(receiver);
     if (client)
     {
         QJsonObject message_obj{{"type", "is_typing"},
@@ -582,7 +576,7 @@ void server_manager::group_is_typing_received(const int &groupID, const QString 
         if (phone_number.toInt() == _clients.key(_socket))
             continue;
 
-        QWebSocket *client = _clients.value(phone_number.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(phone_number.toInt());
         if (client)
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
     }
@@ -601,7 +595,7 @@ void server_manager::update_info_received(const QString &first_name, const QStri
     QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, _clients.key(_socket));
     for (const QJsonValue &ID : contactIDs)
     {
-        QWebSocket *client = _clients.value(ID.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(ID.toInt());
         if (client)
         {
             QJsonObject message2{{"type", "contact_info_updated"},
@@ -659,7 +653,7 @@ void server_manager::remove_group_member(const int &groupID, QJsonArray group_me
                                 {"message", message},
                                 {"groupID", groupID}};
 
-        QWebSocket *client = _clients.value(phone_number.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(phone_number.toInt());
         if (client)
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
     }
@@ -669,7 +663,7 @@ void server_manager::remove_group_member(const int &groupID, QJsonArray group_me
     QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
     for (const QJsonValue &phone_number : json_doc.object().value("group_members").toArray())
     {
-        QWebSocket *client = _clients.value(phone_number.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(phone_number.toInt());
         if (client)
         {
             QJsonObject message_obj{{"type", "remove_group_member"},
@@ -690,7 +684,7 @@ void server_manager::add_group_member(const int &groupID, QJsonArray group_membe
     QJsonArray current_group_members = json_doc.object().value("group_members").toArray();
     for (const QJsonValue &phone_number : current_group_members)
     {
-        QWebSocket *client = _clients.value(phone_number.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(phone_number.toInt());
         if (client)
         {
             QJsonObject message_obj{{"type", "add_group_member"},
@@ -719,7 +713,7 @@ void server_manager::add_group_member(const int &groupID, QJsonArray group_membe
         QJsonObject update_object2{{"$push", push_object2}};
         Account::update_document(_chatAppDB, "accounts", filter_object2, update_object2);
 
-        QWebSocket *client = _clients.value(phone_number.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(phone_number.toInt());
         if (client)
         {
             QJsonObject group_info{{"_id", groupID},
@@ -749,7 +743,7 @@ void server_manager::delete_message(const int &receiver, const int &chat_ID, con
 
     _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
 
-    QWebSocket *client = _clients.value(receiver);
+    std::shared_ptr<QWebSocket> client = _clients.value(receiver);
     if (client)
         client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
 
@@ -772,7 +766,7 @@ void server_manager::delete_group_message(const int &groupID, const QString &ful
     QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
     for (const QJsonValue &phone_number : json_doc.object().value("group_members").toArray())
     {
-        QWebSocket *client = _clients.value(phone_number.toInt());
+        std::shared_ptr<QWebSocket> client = _clients.value(phone_number.toInt());
         if (client)
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
     }
