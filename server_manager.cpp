@@ -176,19 +176,6 @@ void server_manager::login_request(const int &phone_number, const QString &passw
     }
 }
 
-void server_manager::audio_received(const QString &audio_name, const QString &audio_data)
-{
-    QByteArray decoded_data = QByteArray::fromBase64(audio_data.toUtf8());
-    std::string decoded_string = decoded_data.toStdString();
-
-    std::string audio_url = S3::store_data_to_s3(*_s3_client, audio_name.toStdString(), decoded_string);
-
-    QJsonObject message{{"type", "audio"},
-                        {"audio_url", QString::fromStdString(audio_url)}};
-
-    _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
-}
-
 void server_manager::lookup_friend(const int &phone_number)
 {
     QJsonObject filter_object{{"_id", phone_number}};
@@ -795,6 +782,76 @@ void server_manager::delete_account()
     Account::delete_account(_chatAppDB, _clients.key(_socket));
 }
 
+void server_manager::audio_received(const int &chatID, const int &receiver, const QString &audio_name, const QString &audio_data, const QString &time)
+{
+    QByteArray decoded_data = QByteArray::fromBase64(audio_data.toUtf8());
+    std::string decoded_string = decoded_data.toStdString();
+
+    std::string audio_url = S3::store_data_to_s3(*_s3_client, audio_name.toStdString(), decoded_string);
+
+    QJsonObject message_obj{{"type", "audio"},
+                            {"chatID", chatID},
+                            {"sender_ID", _clients.key(_socket)},
+                            {"audio_url", QString::fromStdString(audio_url)},
+                            {"time", time}};
+    std::shared_ptr<QWebSocket> client = _clients.value(receiver);
+    if (client)
+        client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+
+    _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+
+    QJsonObject filter_object{{"_id", chatID}};
+
+    QJsonObject push_field{{"audio_url", QString::fromStdString(audio_url)},
+                           {"sender", _clients.key(_socket)},
+                           {"time", time}};
+    QJsonObject push_object{{"messages", push_field}};
+
+    QJsonObject update_object{{"$push", push_object}};
+
+    Account::update_document(_chatAppDB, "chats", filter_object, update_object);
+
+    QJsonObject account_filter{{"_id", receiver}, {"contacts.chatID", chatID}};
+    QJsonObject increment_object{{"$inc", QJsonObject{{"contacts.$.unread_messages", 1}}}};
+
+    Account::update_document(_chatAppDB, "accounts", account_filter, increment_object);
+}
+
+void server_manager::group_audio_received(const int &groupID, const QString &sender_name, const QString &audio_name, const QString &audio_data, const QString &time)
+{
+    QByteArray decoded_data = QByteArray::fromBase64(audio_data.toUtf8());
+    std::string decoded_string = decoded_data.toStdString();
+
+    std::string audio_url = S3::store_data_to_s3(*_s3_client, audio_name.toStdString(), decoded_string);
+
+    QJsonObject filter_object{{"_id", groupID}};
+
+    QJsonObject message_obj{{"type", "group_audio"},
+                            {"groupID", groupID},
+                            {"sender_ID", _clients.key(_socket)},
+                            {"sender_name", sender_name},
+                            {"audio_url", QString::fromStdString(audio_url)},
+                            {"time", time}};
+
+    QJsonObject increment_object{{"$inc", QJsonObject{{"groups.$.group_unread_messages", 1}}}};
+
+    QJsonDocument json_doc = Account::find_document(_chatAppDB, "groups", filter_object, QJsonObject{{"_id", 0}, {"group_members", 1}});
+    for (const QJsonValue &phone_number : json_doc.object().value("group_members").toArray())
+    {
+        std::shared_ptr<QWebSocket> client = _clients.value(phone_number.toInt());
+        if (client)
+            client->sendTextMessage(QString::fromUtf8(QJsonDocument(message_obj).toJson()));
+    }
+
+    QJsonObject push_object{{"group_messages", QJsonObject{{"audio_url", QString::fromStdString(audio_url)},
+                                                           {"sender_ID", _clients.key(_socket)},
+                                                           {"sender_name", sender_name},
+                                                           {"time", time}}}};
+
+    QJsonObject update_object{{"$push", push_object}};
+    Account::update_document(_chatAppDB, "groups", filter_object, update_object);
+}
+
 void server_manager::on_text_message_received(const QString &message)
 {
     QJsonDocument json_doc = QJsonDocument::fromJson(message.toUtf8());
@@ -879,8 +936,10 @@ void server_manager::on_text_message_received(const QString &message)
         delete_account();
         break;
     case Audio:
+        audio_received(json_object["chatID"].toInt(), json_object["receiver"].toInt(), json_object["audio_name"].toString(), json_object["audio_data"].toString(), json_object["time"].toString());
         break;
     case GroupAudio:
+        group_audio_received(json_object["groupID"].toInt(), json_object["sender_name"].toString(), json_object["audio_name"].toString(), json_object["audio_data"].toString(), json_object["time"].toString());
         break;
     default:
         qWarning() << "Unknown message type: " << json_object["type"].toString();
@@ -918,5 +977,4 @@ void server_manager::map_initialization()
     _map["delete_account"] = DeleteAccount;
     _map["audio"] = Audio;
     _map["group_audio"] = GroupAudio;
-    _map["invalid_type"] = InvalidType;
 }

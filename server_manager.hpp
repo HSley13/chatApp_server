@@ -18,7 +18,6 @@ public:
 
     void sign_up(const int &phone_number, const QString &first_name, const QString &last_name, const QString &password, const QString &secret_question, const QString &secret_answer);
     void login_request(const int &phone_number, const QString &password, const QString &time_zone);
-    void audio_received(const QString &audio_name, const QString &audio_data);
     void lookup_friend(const int &phone_number);
     void profile_image(const QString &file_name, const QString &data);
     void group_profile_image(const int &group_ID, const QString &file_name, const QString &data);
@@ -40,6 +39,8 @@ public:
     void update_unread_message(const int &chatID);
     void update_group_unread_message(const int &groupID);
     void delete_account();
+    void audio_received(const int &chatID, const int &receiver, const QString &audio_name, const QString &audio_data, const QString &time);
+    void group_audio_received(const int &groupID, const QString &sender_name, const QString &audio_name, const QString &audio_data, const QString &time);
 
 private slots:
     void on_new_connection();
@@ -91,8 +92,7 @@ private:
         DeleteGroupMessage,
         UpdateUnreadMessage,
         UpdateGroupUnreadMessage,
-        DeleteAccount,
-        InvalidType
+        DeleteAccount
     };
     static QHash<QString, MessageType> _map;
 };
