@@ -5,7 +5,8 @@
 #include <QJsonValue>
 #include <QTime>
 
-#include "database.h"
+#include "database.hpp"
+
 class server_manager : public QObject
 {
     Q_OBJECT

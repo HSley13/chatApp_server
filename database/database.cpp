@@ -1,4 +1,4 @@
-#include "database.h"
+#include "database.hpp"
 
 std::string S3::get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key)
 {

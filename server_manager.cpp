@@ -1,4 +1,4 @@
-#include "server_manager.h"
+#include "server_manager.hpp"
 
 QHash<int, std::shared_ptr<QWebSocket>> server_manager::_clients;
 QHash<int, QString> server_manager::_time_zone;
@@ -227,27 +227,27 @@ void server_manager::lookup_friend(const int &phone_number)
                               {"messages", messages_array}};
     Account::insert_document(_chatAppDB, "chats", insert_object);
 
+    QJsonObject fields{{"_id", 1},
+                       {"status", 1},
+                       {"first_name", 1},
+                       {"last_name", 1},
+                       {"image_url", 1}};
     std::shared_ptr<QWebSocket> client = _clients.value(phone_number);
     if (client)
     {
         filter_object[QStringLiteral("_id")] = _clients.key(_socket);
 
-        QJsonObject fields{{"_id", 1},
-                           {"status", 1},
-                           {"first_name", 1},
-                           {"last_name", 1},
-                           {"image_url", 1}};
-
         QJsonDocument contact_info = Account::find_document(_chatAppDB, "accounts", filter_object, fields);
 
         QJsonObject obj1{{"contactInfo", contact_info.object()},
+                         {"chatMessages", messages_array},
                          {"chatID", chatID}};
 
         QJsonArray json_array;
         json_array.append(obj1);
 
         QJsonObject message{{"type", "added_you"},
-                            {"message", _socket->property("id").toString() + " added You"},
+                            {"message", _socket->property("id").toString() + " added You as Friend"},
                             {"json_array", json_array}};
 
         client->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson()));
@@ -262,15 +262,10 @@ void server_manager::lookup_friend(const int &phone_number)
 
     filter_object[QStringLiteral("_id")] = phone_number;
 
-    QJsonObject fields2{{"_id", 1},
-                        {"status", 1},
-                        {"first_name", 1},
-                        {"last_name", 1},
-                        {"image_url", 1}};
-
-    QJsonDocument contact_info2 = Account::find_document(_chatAppDB, "accounts", filter_object, fields2);
+    QJsonDocument contact_info2 = Account::find_document(_chatAppDB, "accounts", filter_object, fields);
 
     QJsonObject obj2{{"contactInfo", contact_info2.object()},
+                     {"chatMessages", messages_array},
                      {"chatID", chatID}};
 
     QJsonArray json_array2;
@@ -397,15 +392,6 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
 
     int groupID = distribution(generator);
 
-    QJsonObject new_group{{"_id", groupID},
-                          {"group_name", group_name},
-                          {"group_admin", _clients.key(_socket)},
-                          {"group_image_url", "https://slays3.s3.amazonaws.com/networking.png"},
-                          {"group_members", QJsonArray{group_members}},
-                          {"group_messages", QJsonArray{}}};
-
-    Account::insert_document(_chatAppDB, "groups", new_group);
-
     QJsonArray messages_array;
     QJsonObject first_message{{"message", "New Group Created"},
                               {"sender_ID", groupID},
@@ -413,9 +399,13 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
                               {"time", QDateTime::currentDateTimeUtc().toString()}};
     messages_array.append(first_message);
 
-    QJsonObject insert_object{{"_id", groupID},
-                              {"group_messages", messages_array}};
-    Account::insert_document(_chatAppDB, "groups", insert_object);
+    QJsonObject new_group{{"_id", groupID},
+                          {"group_name", group_name},
+                          {"group_admin", _clients.key(_socket)},
+                          {"group_image_url", "https://slays3.s3.amazonaws.com/networking.png"},
+                          {"group_members", group_members},
+                          {"group_messages", messages_array}};
+    Account::insert_document(_chatAppDB, "groups", new_group);
 
     QJsonObject push_object{{"groups", QJsonObject{{"groupID", groupID},
                                                    {"group_unread_messages", 1}}}};
@@ -439,7 +429,10 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
             QJsonArray groups;
             groups.append(group_info);
 
+            QString notification = QString("%1 %2").arg("You were added to a new Group name: ", group_name);
+
             QJsonObject message1{{"type", "added_to_group"},
+                                 {"message", notification},
                                  {"groups", groups}};
 
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message1).toJson()));

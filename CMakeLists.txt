@@ -15,12 +15,11 @@ find_package(PkgConfig REQUIRED)
 add_subdirectory(database/)
 
 qt_add_executable(${PROJECT_NAME} WIN32 MACOSX_BUNDLE
-                    server_main.cpp
-                    server_manager.cpp
-                )
+                                                    server_main.cpp
+                                                    server_manager.cpp
+                    )
 
-target_link_libraries(${PROJECT_NAME} PRIVATE
-                                            database_library)
+target_link_libraries(${PROJECT_NAME} PRIVATE database_library)
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy
