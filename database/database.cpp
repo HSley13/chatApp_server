@@ -503,7 +503,6 @@ void Account::delete_account(mongocxx::database &db, const int &account_id)
                 bsoncxx::builder::stream::document{} << "_id" << chatID << bsoncxx::builder::stream::finalize);
         }
 
-        // Finally, delete the account itself
         account_collection.delete_one(
             bsoncxx::builder::stream::document{} << "_id" << account_id << bsoncxx::builder::stream::finalize);
 

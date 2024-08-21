@@ -1,13 +1,5 @@
 #include "server_manager.hpp"
 
-QHash<int, std::shared_ptr<QWebSocket>> server_manager::_clients;
-QHash<int, QString> server_manager::_time_zone;
-mongocxx::database server_manager::_chatAppDB;
-QHash<QString, server_manager::MessageType> server_manager::_map;
-
-Aws::SDKOptions server_manager::_options;
-std::shared_ptr<Aws::S3::S3Client> server_manager::_s3_client;
-
 server_manager::server_manager(const QString &URI_string, QObject *parent)
     : QObject(parent)
 {

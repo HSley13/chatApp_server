@@ -1,10 +1,5 @@
 #pragma once
 
-#include <QJsonObject>
-#include <QJsonDocument>
-#include <QJsonValue>
-#include <QTime>
-
 #include "database.hpp"
 
 class server_manager : public QObject
@@ -51,12 +46,12 @@ private:
     QWebSocketServer *_server{nullptr};
     std::shared_ptr<QWebSocket> _socket{nullptr};
 
-    static mongocxx::database _chatAppDB;
-    static QHash<int, std::shared_ptr<QWebSocket>> _clients;
-    static QHash<int, QString> _time_zone;
+    static inline mongocxx::database _chatAppDB{};
+    static inline QHash<int, std::shared_ptr<QWebSocket>> _clients{};
+    static inline QHash<int, QString> _time_zone{};
 
-    static Aws::SDKOptions _options;
-    static std::shared_ptr<Aws::S3::S3Client> _s3_client;
+    static inline Aws::SDKOptions _options{};
+    static inline std::shared_ptr<Aws::S3::S3Client> _s3_client{};
 
     QHostAddress _ip{QHostAddress::Any};
     int _port{12345};
@@ -94,5 +89,5 @@ private:
         UpdateGroupUnreadMessage,
         DeleteAccount
     };
-    static QHash<QString, MessageType> _map;
+    static inline QHash<QString, MessageType> _map{};
 };

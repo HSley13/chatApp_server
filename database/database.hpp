@@ -10,6 +10,11 @@
 #include <QWebSocket>
 #include <QWebSocketServer>
 
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QJsonValue>
+#include <QTime>
+
 #include <iostream>
 
 #include <mongocxx/client.hpp>
