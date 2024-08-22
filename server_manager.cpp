@@ -1,6 +1,6 @@
 #include "server_manager.hpp"
 
-server_manager::server_manager(const QString &URI_string, QObject *parent)
+server_manager::server_manager(QObject *parent)
     : QObject(parent)
 {
     _server = new QWebSocketServer(QString("ChatApp Server"), QWebSocketServer::NonSecureMode, this);
@@ -9,7 +9,7 @@ server_manager::server_manager(const QString &URI_string, QObject *parent)
     map_initialization();
 
     static mongocxx::instance instance{};
-    static mongocxx::uri uri{URI_string.toStdString()};
+    static mongocxx::uri uri{std::getenv("MONGODB_URI")};
 
     static mongocxx::client connection{uri};
     if (!connection)
@@ -316,7 +316,7 @@ void server_manager::group_profile_image(const int &group_ID, const QString &fil
 void server_manager::profile_image_deleted()
 {
     QJsonObject filter_object{{"_id", _clients.key(_socket)}};
-    QJsonObject update_field{{"$set", QJsonObject{{"image_url", "https://slays3.s3.us-east-1.amazonaws.com/contact.png"}}}};
+    QJsonObject update_field{{"$set", QJsonObject{{"image_url", QString(std::getenv("AWS_LINK")) + "contact.png"}}}};
     Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
 
     QJsonArray contactIDs = Account::fetch_contactIDs(_chatAppDB, _clients.key(_socket));
@@ -327,7 +327,7 @@ void server_manager::profile_image_deleted()
         {
             QJsonObject message2{{"type", "client_profile_image"},
                                  {"phone_number", _clients.key(_socket)},
-                                 {"image_url", "https://slays3.s3.us-east-1.amazonaws.com/contact.png"}};
+                                 {"image_url", QString(std::getenv("AWS_LINK")) + "contact.png"}};
 
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message2).toJson()));
         };
@@ -381,7 +381,7 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
     QJsonObject new_group{{"_id", groupID},
                           {"group_name", group_name},
                           {"group_admin", _clients.key(_socket)},
-                          {"group_image_url", "https://slays3.s3.amazonaws.com/networking.png"},
+                          {"group_image_url", QString(std::getenv("AWS_LINK")) + "networking.png"},
                           {"group_members", group_members},
                           {"group_messages", messages_array}};
     Account::insert_document(_chatAppDB, "groups", new_group);
@@ -402,7 +402,7 @@ void server_manager::new_group(const QString &group_name, QJsonArray group_membe
                                    {"group_admin", _clients.key(_socket)},
                                    {"group_messages", messages_array},
                                    {"group_members", group_members},
-                                   {"group_image_url", "https://slays3.s3.amazonaws.com/networking.png"},
+                                   {"group_image_url", QString(std::getenv("AWS_LINK")) + "networking.png"},
                                    {"group_unread_messages", 1}};
 
             QJsonArray groups;

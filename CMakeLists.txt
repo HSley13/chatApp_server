@@ -15,7 +15,7 @@ find_package(PkgConfig REQUIRED)
 add_subdirectory(database/)
 
 qt_add_executable(${PROJECT_NAME} WIN32 MACOSX_BUNDLE
-                                                    server_main.cpp
+                                                    main.cpp
                                                     server_manager.cpp
                     )
 

@@ -3,7 +3,7 @@
 std::string S3::get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key)
 {
     Aws::S3::Model::GetObjectRequest request;
-    request.SetBucket("slays3");
+    request.SetBucket(std::getenv("AWS_BUCKET"));
     request.SetKey(key.c_str());
 
     Aws::S3::Model::GetObjectOutcome outcome = s3_client.GetObject(request);
@@ -12,6 +12,7 @@ std::string S3::get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::
         Aws::IOStream &retrieved_object = outcome.GetResultWithOwnership().GetBody();
         std::stringstream ss;
         ss << retrieved_object.rdbuf();
+
         return ss.str();
     }
     else
@@ -25,7 +26,7 @@ std::string S3::get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::
 std::string S3::store_data_to_s3(const Aws::S3::S3Client &s3_client, const std::string &key, const std::string &data)
 {
     Aws::S3::Model::PutObjectRequest request;
-    request.SetBucket("slays3");
+    request.SetBucket(std::getenv("AWS_BUCKET"));
     request.SetKey(key.c_str());
 
     auto data_stream = Aws::MakeShared<Aws::StringStream>("PutObjectStream");
@@ -37,7 +38,7 @@ std::string S3::store_data_to_s3(const Aws::S3::S3Client &s3_client, const std::
     {
         std::cout << "Successfully uploaded object to " << key << std::endl;
 
-        std::string url = "https://slays3.s3.us-east-1.amazonaws.com/" + key;
+        std::string url = std::getenv("AWS_LINK") + key;
 
         return url;
     }
@@ -54,13 +55,13 @@ std::string S3::store_data_to_s3(const Aws::S3::S3Client &s3_client, const std::
 bool S3::delete_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key)
 {
     Aws::S3::Model::DeleteObjectRequest request;
-    request.SetBucket("slays3");
+    request.SetBucket(std::getenv("AWS_BUCKET"));
     request.SetKey(key.c_str());
 
     Aws::S3::Model::DeleteObjectOutcome outcome = s3_client.DeleteObject(request);
     if (outcome.IsSuccess())
     {
-        std::cout << "Successfully deleted object from slays3/" << key << std::endl;
+        std::cout << "Successfully deleted object from: " << std::getenv("AWS_BUCKET") << "/" << key << std::endl;
 
         return true;
     }

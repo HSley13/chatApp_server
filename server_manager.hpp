@@ -7,7 +7,7 @@ class server_manager : public QObject
     Q_OBJECT
 
 public:
-    server_manager(const QString &URI_string, QObject *parent = nullptr);
+    server_manager(QObject *parent = nullptr);
     server_manager(std::shared_ptr<QWebSocket> client, QObject *parent = nullptr);
     ~server_manager();
 
