@@ -21,10 +21,15 @@ server_manager::server_manager(QObject *parent)
     _chatAppDB = connection.database("chatAppDB");
 
     Aws::InitAPI(_options);
-    _s3_client = std::make_shared<Aws::S3::S3Client>();
+
+    Aws::Auth::AWSCredentials credentials(std::getenv("ACCESS_KEY"), std::getenv("SECRET_ACCESS_KEY"));
+    Aws::Client::ClientConfiguration clientConfig;
+    clientConfig.region = std::getenv("BUCKET_REGION");
+
+    _s3_client = std::make_shared<Aws::S3::S3Client>(credentials, clientConfig, Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, true);
 
     _server->listen(_ip, _port);
-    qDebug() << "Server is running on port: " << _port;
+    qDebug() << "Server is running on port:" << _port;
 }
 
 server_manager::~server_manager()
@@ -263,14 +268,14 @@ void server_manager::profile_image(const QString &file_name, const QString &data
     QByteArray decoded_data = QByteArray::fromBase64(data.toUtf8());
     std::string decoded_string = decoded_data.toStdString();
 
-    std::string url = S3::store_data_to_s3(*_s3_client, file_name.toStdString(), decoded_string);
+    std::string presigned_url = S3::store_data_to_s3(*_s3_client, file_name.toStdString(), decoded_string);
 
     QJsonObject filter_object{{"_id", _clients.key(_socket)}};
-    QJsonObject update_field{{"$set", QJsonObject{{"image_url", QString::fromStdString(url)}}}};
+    QJsonObject update_field{{"$set", QJsonObject{{"image_url", QString::fromStdString(presigned_url)}}}};
     Account::update_document(_chatAppDB, "accounts", filter_object, update_field);
 
     QJsonObject message1{{"type", "profile_image"},
-                         {"image_url", QString::fromStdString(url)}};
+                         {"image_url", QString::fromStdString(presigned_url)}};
 
     _socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message1).toJson()));
 
@@ -282,7 +287,7 @@ void server_manager::profile_image(const QString &file_name, const QString &data
         {
             QJsonObject message2{{"type", "client_profile_image"},
                                  {"phone_number", _clients.key(_socket)},
-                                 {"image_url", QString::fromStdString(url)}};
+                                 {"image_url", QString::fromStdString(presigned_url)}};
 
             client->sendTextMessage(QString::fromUtf8(QJsonDocument(message2).toJson()));
         };

@@ -4,9 +4,7 @@ pkg_check_modules(BSONCXX REQUIRED libbsoncxx)
 add_library(database_library STATIC database.cpp)
 
 target_link_libraries(database_library PUBLIC
-                                        Qt6::Core 
                                         Qt6::Widgets
-                                        Qt6::Multimedia
                                         Qt6::WebSockets
                                         ${MONGOCXX_LIBRARIES} 
                                         ${BSONCXX_LIBRARIES}

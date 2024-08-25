@@ -5,15 +5,8 @@
 #endif
 
 #include <QtWidgets>
-#include <QtCore>
-#include <QtMultimedia>
 #include <QWebSocket>
 #include <QWebSocketServer>
-
-#include <QJsonObject>
-#include <QJsonDocument>
-#include <QJsonValue>
-#include <QTime>
 
 #include <iostream>
 
@@ -27,9 +20,12 @@
 
 #include <aws/core/Aws.h>
 #include <aws/s3/S3Client.h>
+#include <aws/core/auth/AWSCredentials.h>
+#include <aws/core/client/ClientConfiguration.h>
 #include <aws/s3/model/PutObjectRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
 #include <aws/s3/model/GetObjectRequest.h>
+#include <aws/core/client/AWSUrlPresigner.h>
 
 class Security
 {
@@ -65,7 +61,7 @@ class S3
 public:
     static std::string get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key);
 
-    static std::string store_data_to_s3(const Aws::S3::S3Client &s3_client, const std::string &key, const std::string &data);
+    static std::string store_data_to_s3(Aws::S3::S3Client &s3_client, const std::string &key, const std::string &data);
 
     static bool delete_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key);
 };
