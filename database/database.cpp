@@ -1,30 +1,25 @@
 #include "database.hpp"
 
-std::string S3::get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key)
-{
+std::string S3::get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key) {
     Aws::S3::Model::GetObjectRequest request;
     request.SetBucket(std::getenv("BUCKET_NAME"));
     request.SetKey(key.c_str());
 
     Aws::S3::Model::GetObjectOutcome outcome = s3_client.GetObject(request);
-    if (outcome.IsSuccess())
-    {
+    if (outcome.IsSuccess()) {
         Aws::IOStream &retrieved_object = outcome.GetResultWithOwnership().GetBody();
         std::stringstream ss;
         ss << retrieved_object.rdbuf();
 
         return ss.str();
-    }
-    else
-    {
+    } else {
         std::cerr << "GetObject error: " << outcome.GetError().GetExceptionName() << " - " << outcome.GetError().GetMessage() << std::endl;
 
         return std::string();
     }
 }
 
-std::string S3::store_data_to_s3(Aws::S3::S3Client &s3_client, const std::string &key, const std::string &data)
-{
+std::string S3::store_data_to_s3(Aws::S3::S3Client &s3_client, const std::string &key, const std::string &data) {
     Aws::S3::Model::PutObjectRequest request;
     request.SetBucket(std::getenv("BUCKET_NAME"));
     request.SetKey(key.c_str());
@@ -34,16 +29,13 @@ std::string S3::store_data_to_s3(Aws::S3::S3Client &s3_client, const std::string
     request.SetBody(data_stream);
 
     Aws::S3::Model::PutObjectOutcome outcome = s3_client.PutObject(request);
-    if (outcome.IsSuccess())
-    {
+    if (outcome.IsSuccess()) {
         std::cout << "Successfully uploaded object " << key << std::endl;
 
-        Aws::String presigned_url = s3_client.GeneratePresignedUrl(request.GetBucket(), request.GetKey(), Aws::Http::HttpMethod::HTTP_GET);
+        Aws::String presigned_url = s3_client.GeneratePresignedUrl(request.GetBucket(), request.GetKey(), Aws::Http::HttpMethod::HTTP_GET, 604800);
 
         return presigned_url.c_str();
-    }
-    else
-    {
+    } else {
         std::cerr << "PutObject error: "
                   << outcome.GetError().GetExceptionName() << " - "
                   << outcome.GetError().GetMessage() << std::endl;
@@ -52,34 +44,28 @@ std::string S3::store_data_to_s3(Aws::S3::S3Client &s3_client, const std::string
     }
 }
 
-bool S3::delete_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key)
-{
+bool S3::delete_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key) {
     Aws::S3::Model::DeleteObjectRequest request;
     request.SetBucket(std::getenv("BUCKET_NAME"));
     request.SetKey(key.c_str());
 
     Aws::S3::Model::DeleteObjectOutcome outcome = s3_client.DeleteObject(request);
-    if (outcome.IsSuccess())
-    {
+    if (outcome.IsSuccess()) {
         std::cout << "Successfully deleted object from: " << std::getenv("BUCKET_NAME") << "/" << key << std::endl;
 
         return true;
-    }
-    else
-    {
+    } else {
         std::cerr << "DeleteObject error: " << outcome.GetError().GetExceptionName() << " - " << outcome.GetError().GetMessage() << std::endl;
 
         return false;
     }
 }
 
-QString Security::generate_random_salt(std::size_t len)
-{
+QString Security::generate_random_salt(std::size_t len) {
     const QString valid_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#&?!~^-$%*+";
     QString salt;
 
-    for (size_t i{0}; i < len; i++)
-    {
+    for (size_t i{0}; i < len; i++) {
         int index = QRandomGenerator::global()->bounded(valid_chars.size());
         salt.append(valid_chars.at(index));
     }
@@ -87,8 +73,7 @@ QString Security::generate_random_salt(std::size_t len)
     return salt;
 }
 
-QString Security::hashing_password(const QString &password)
-{
+QString Security::hashing_password(const QString &password) {
     const size_t SALT_LENGTH = 32;
     QString salt = generate_random_salt(SALT_LENGTH);
 
@@ -98,8 +83,7 @@ QString Security::hashing_password(const QString &password)
     return salt + QString::fromUtf8(hash.toHex());
 }
 
-bool Security::verifying_password(const QString &password, const QString &hashed_password)
-{
+bool Security::verifying_password(const QString &password, const QString &hashed_password) {
     const uint32_t hash_length = 64;
     const size_t SALT_LENGTH = hashed_password.length() - hash_length;
 
@@ -112,10 +96,8 @@ bool Security::verifying_password(const QString &password, const QString &hashed
     return !original_hash.compare(QString::fromUtf8(hash.toHex()));
 }
 
-bool Account::insert_document(mongocxx::database &db, const std::string &collection_name, const QJsonObject &json_object)
-{
-    try
-    {
+bool Account::insert_document(mongocxx::database &db, const std::string &collection_name, const QJsonObject &json_object) {
+    try {
         mongocxx::collection collection = db.collection(collection_name);
 
         QString json_string = QJsonDocument(json_object).toJson(QJsonDocument::Compact);
@@ -124,25 +106,19 @@ bool Account::insert_document(mongocxx::database &db, const std::string &collect
         mongocxx::stdx::optional<mongocxx::result::insert_one> result = collection.insert_one(document.view());
 
         return result && result->result().inserted_count() == 1;
-    }
-    catch (const mongocxx::exception &e)
-    {
+    } catch (const mongocxx::exception &e) {
         std::cerr << "MongoDB Exception: " << e.what() << std::endl;
 
         return false;
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception &e) {
         std::cerr << "Error inserting document: " << e.what() << std::endl;
 
         return false;
     }
 }
 
-bool Account::delete_document(mongocxx::database &db, const std::string &collection_name, const QJsonObject &filter_object)
-{
-    try
-    {
+bool Account::delete_document(mongocxx::database &db, const std::string &collection_name, const QJsonObject &filter_object) {
+    try {
         mongocxx::collection collection = db.collection(collection_name);
 
         QString json_string = QJsonDocument(filter_object).toJson(QJsonDocument::Compact);
@@ -151,25 +127,19 @@ bool Account::delete_document(mongocxx::database &db, const std::string &collect
         mongocxx::stdx::optional<mongocxx::result::delete_result> result = collection.delete_one(filter.view());
 
         return result && result->deleted_count() == 1;
-    }
-    catch (const mongocxx::exception &e)
-    {
+    } catch (const mongocxx::exception &e) {
         std::cerr << "MongoDB Exception: " << e.what() << std::endl;
 
         return false;
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception &e) {
         std::cerr << "Error deleting document: " << e.what() << std::endl;
 
         return false;
     }
 }
 
-bool Account::update_document(mongocxx::database &db, const std::string &collection_name, const QJsonObject &filter_object, const QJsonObject &update_object)
-{
-    try
-    {
+bool Account::update_document(mongocxx::database &db, const std::string &collection_name, const QJsonObject &filter_object, const QJsonObject &update_object) {
+    try {
         mongocxx::collection collection = db.collection(collection_name);
 
         QString filter_json_string = QJsonDocument(filter_object).toJson(QJsonDocument::Compact);
@@ -183,25 +153,19 @@ bool Account::update_document(mongocxx::database &db, const std::string &collect
         mongocxx::stdx::optional<mongocxx::result::update> result = collection.update_one(filter.view(), update.view());
 
         return result && result->modified_count() == 1;
-    }
-    catch (const mongocxx::exception &e)
-    {
+    } catch (const mongocxx::exception &e) {
         std::cerr << "MongoDB Exception: " << e.what() << std::endl;
 
         return false;
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception &e) {
         std::cerr << "std Exception: " << e.what() << std::endl;
 
         return false;
     }
 }
 
-QJsonDocument Account::find_document(mongocxx::database &db, const std::string &collection_name, const QJsonObject &filter_object, const QJsonObject &fields)
-{
-    try
-    {
+QJsonDocument Account::find_document(mongocxx::database &db, const std::string &collection_name, const QJsonObject &filter_object, const QJsonObject &fields) {
+    try {
         mongocxx::collection collection = db.collection(collection_name);
 
         QString filter_json_string = QJsonDocument(filter_object).toJson(QJsonDocument::Compact);
@@ -216,8 +180,7 @@ QJsonDocument Account::find_document(mongocxx::database &db, const std::string &
         mongocxx::cursor cursor = collection.find(filter.view(), find_options);
 
         QJsonArray result_array;
-        for (const bsoncxx::document::view &doc : cursor)
-        {
+        for (const bsoncxx::document::view &doc : cursor) {
             QString json_string = QString::fromStdString(bsoncxx::to_json(doc));
             QJsonDocument json_doc = QJsonDocument::fromJson(json_string.toUtf8());
 
@@ -228,25 +191,19 @@ QJsonDocument Account::find_document(mongocxx::database &db, const std::string &
             return QJsonDocument();
 
         return (result_array.size() == 1) ? QJsonDocument(result_array.first().toObject()) : QJsonDocument(result_array);
-    }
-    catch (const mongocxx::exception &e)
-    {
+    } catch (const mongocxx::exception &e) {
         std::cerr << "MongoDB Exception: " << e.what() << std::endl;
 
         return QJsonDocument();
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception &e) {
         std::cerr << "std Exception: " << e.what() << std::endl;
 
         return QJsonDocument();
     }
 }
 
-QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const int &account_id)
-{
-    try
-    {
+QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const int &account_id) {
+    try {
         mongocxx::collection collection = db.collection("accounts");
 
         mongocxx::pipeline pipeline{};
@@ -309,8 +266,7 @@ QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const in
         mongocxx::cursor cursor = collection.aggregate(pipeline);
 
         QJsonArray result_array;
-        for (const bsoncxx::document::view &doc : cursor)
-        {
+        for (const bsoncxx::document::view &doc : cursor) {
             QString json_string = QString::fromStdString(bsoncxx::to_json(doc));
             QJsonDocument json_doc = QJsonDocument::fromJson(json_string.toUtf8());
 
@@ -319,23 +275,17 @@ QJsonDocument Account::fetch_contacts_and_chats(mongocxx::database &db, const in
         }
 
         return result_array.isEmpty() ? QJsonDocument() : QJsonDocument(result_array);
-    }
-    catch (const mongocxx::exception &e)
-    {
+    } catch (const mongocxx::exception &e) {
         std::cerr << "MongoDB Exception: " << e.what() << std::endl;
         return QJsonDocument();
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception &e) {
         std::cerr << "std Exception: " << e.what() << std::endl;
         return QJsonDocument();
     }
 }
 
-QJsonDocument Account::fetch_groups_and_chats(mongocxx::database &db, const int &account_id)
-{
-    try
-    {
+QJsonDocument Account::fetch_groups_and_chats(mongocxx::database &db, const int &account_id) {
+    try {
         mongocxx::collection collection = db.collection("accounts");
 
         mongocxx::pipeline pipeline{};
@@ -368,8 +318,7 @@ QJsonDocument Account::fetch_groups_and_chats(mongocxx::database &db, const int 
         mongocxx::cursor cursor = collection.aggregate(pipeline);
 
         QJsonArray result_array;
-        for (const bsoncxx::document::view &doc : cursor)
-        {
+        for (const bsoncxx::document::view &doc : cursor) {
             QString json_string = QString::fromStdString(bsoncxx::to_json(doc));
             QJsonDocument json_doc = QJsonDocument::fromJson(json_string.toUtf8());
 
@@ -378,23 +327,17 @@ QJsonDocument Account::fetch_groups_and_chats(mongocxx::database &db, const int 
         }
 
         return result_array.isEmpty() ? QJsonDocument() : QJsonDocument(result_array);
-    }
-    catch (const mongocxx::exception &e)
-    {
+    } catch (const mongocxx::exception &e) {
         std::cerr << "MongoDB Exception: " << e.what() << std::endl;
         return QJsonDocument();
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception &e) {
         std::cerr << "std Exception: " << e.what() << std::endl;
         return QJsonDocument();
     }
 }
 
-QJsonArray Account::fetch_contactIDs(mongocxx::database &db, const int &account_id)
-{
-    try
-    {
+QJsonArray Account::fetch_contactIDs(mongocxx::database &db, const int &account_id) {
+    try {
         mongocxx::collection collection = db.collection("accounts");
 
         mongocxx::pipeline pipeline{};
@@ -420,13 +363,11 @@ QJsonArray Account::fetch_contactIDs(mongocxx::database &db, const int &account_
         mongocxx::cursor cursor = collection.aggregate(pipeline);
 
         QJsonArray contact_ids_array;
-        for (const bsoncxx::document::view &doc : cursor)
-        {
+        for (const bsoncxx::document::view &doc : cursor) {
             QString json_string = QString::fromStdString(bsoncxx::to_json(doc));
             QJsonDocument json_doc = QJsonDocument::fromJson(json_string.toUtf8());
 
-            if (!json_doc.isNull() && json_doc.isObject())
-            {
+            if (!json_doc.isNull() && json_doc.isObject()) {
                 QJsonObject json_obj = json_doc.object();
                 QJsonArray ids = json_obj["contactIDs"].toArray();
 
@@ -436,25 +377,19 @@ QJsonArray Account::fetch_contactIDs(mongocxx::database &db, const int &account_
         }
 
         return contact_ids_array;
-    }
-    catch (const mongocxx::exception &e)
-    {
+    } catch (const mongocxx::exception &e) {
         std::cerr << "MongoDB Exception: " << e.what() << std::endl;
 
         return QJsonArray();
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception &e) {
         std::cerr << "std Exception: " << e.what() << std::endl;
 
         return QJsonArray();
     }
 }
 
-void Account::delete_account(mongocxx::database &db, const int &account_id)
-{
-    try
-    {
+void Account::delete_account(mongocxx::database &db, const int &account_id) {
+    try {
         mongocxx::collection account_collection = db["accounts"];
         mongocxx::collection group_collection = db["groups"];
         mongocxx::collection chats_collection = db["chats"];
@@ -462,8 +397,7 @@ void Account::delete_account(mongocxx::database &db, const int &account_id)
         bsoncxx::stdx::optional<bsoncxx::document::value> account_doc = account_collection.find_one(
             bsoncxx::builder::stream::document{} << "_id" << account_id << bsoncxx::builder::stream::finalize);
 
-        if (!account_doc)
-        {
+        if (!account_doc) {
             std::cerr << "Account not found." << std::endl;
             return;
         }
@@ -471,8 +405,7 @@ void Account::delete_account(mongocxx::database &db, const int &account_id)
         bsoncxx::document::view account_view = account_doc->view();
 
         bsoncxx::array::view groups = account_view["groups"].get_array().value;
-        for (bsoncxx::array::element group : groups)
-        {
+        for (bsoncxx::array::element group : groups) {
             int groupID = group["groupID"].get_int32();
 
             group_collection.update_one(
@@ -483,8 +416,7 @@ void Account::delete_account(mongocxx::database &db, const int &account_id)
         }
 
         bsoncxx::array::view contacts = account_view["contacts"].get_array().value;
-        for (bsoncxx::array::element contact : contacts)
-        {
+        for (bsoncxx::array::element contact : contacts) {
             int chatID = contact["chatID"].get_int32();
 
             account_collection.update_many(
@@ -496,8 +428,7 @@ void Account::delete_account(mongocxx::database &db, const int &account_id)
                                                      << bsoncxx::builder::stream::close_document << bsoncxx::builder::stream::finalize);
         }
 
-        for (bsoncxx::array::element contact : contacts)
-        {
+        for (bsoncxx::array::element contact : contacts) {
             int chatID = contact["chatID"].get_int32();
 
             chats_collection.delete_one(
@@ -508,13 +439,9 @@ void Account::delete_account(mongocxx::database &db, const int &account_id)
             bsoncxx::builder::stream::document{} << "_id" << account_id << bsoncxx::builder::stream::finalize);
 
         std::cout << "Account, associated group memberships, and chats deleted successfully." << std::endl;
-    }
-    catch (const mongocxx::exception &e)
-    {
+    } catch (const mongocxx::exception &e) {
         std::cerr << "MongoDB Exception: " << e.what() << std::endl;
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception &e) {
         std::cerr << "std Exception: " << e.what() << std::endl;
     }
 }

@@ -6,7 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(AWSSDK REQUIRED COMPONENTS s3)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets WebSockets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets WebSockets Concurrent)
+
 qt_standard_project_setup()
 
 set(PKG_CONFIG_EXECUTABLE "/opt/homebrew/bin/pkg-config")
@@ -16,7 +17,9 @@ add_subdirectory(database/)
 
 qt_add_executable(${PROJECT_NAME} WIN32 MACOSX_BUNDLE
                                                     main.cpp
-                                                    server_manager.cpp
-                    )
+                                                    server_manager.cpp)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE database_library)
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+

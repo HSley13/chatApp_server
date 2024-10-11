@@ -1,12 +1,12 @@
 #pragma once
 
 #include "database.hpp"
+#include <QtConcurrent>
 
-class server_manager : public QObject
-{
+class server_manager : public QObject {
     Q_OBJECT
 
-public:
+  public:
     server_manager(QObject *parent = nullptr);
     server_manager(std::shared_ptr<QWebSocket> client, QObject *parent = nullptr);
     ~server_manager();
@@ -37,12 +37,12 @@ public:
     void audio_received(const int &chatID, const int &receiver, const QString &audio_name, const QString &audio_data, const QString &time);
     void group_audio_received(const int &groupID, const QString &sender_name, const QString &audio_name, const QString &audio_data, const QString &time);
 
-private slots:
+  private slots:
     void on_new_connection();
     void on_client_disconnected();
     void on_text_message_received(const QString &message);
 
-private:
+  private:
     QWebSocketServer *_server{nullptr};
     std::shared_ptr<QWebSocket> _socket{nullptr};
 
@@ -58,8 +58,7 @@ private:
 
     void map_initialization();
 
-    enum MessageType
-    {
+    enum MessageType {
         SignUp = Qt::UserRole + 1,
         IsTyping,
         ProfileImage,

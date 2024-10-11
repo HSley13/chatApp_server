@@ -6,6 +6,7 @@ add_library(database_library STATIC database.cpp)
 target_link_libraries(database_library PUBLIC
                                         Qt6::Widgets
                                         Qt6::WebSockets
+                                        Qt6::Concurrent
                                         ${MONGOCXX_LIBRARIES} 
                                         ${BSONCXX_LIBRARIES}
                                         ${AWSSDK_LINK_LIBRARIES} 
