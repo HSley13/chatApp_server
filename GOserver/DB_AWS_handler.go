@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,9 +16,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -62,7 +61,7 @@ func HashPassword(password string) (string, error) {
 	return fmt.Sprintf("%s$%s", saltEncoded, hashEncoded), nil
 }
 
-func VerifyPassword(password, hashedPassword string) (bool, error) {
+func VerifyPassword(password string, hashedPassword string) (bool, error) {
 	parts := strings.Split(hashedPassword, "$")
 	if len(parts) != 2 {
 		return false, errors.New("Invalid hashed password format")
@@ -163,9 +162,12 @@ func DeleteDataFromS3(ctx context.Context, s3Client *s3.Client, key string) (boo
 }
 
 func InsertDocument(db *mongo.Database, collectionName string, document bson.M) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	collection := db.Collection(collectionName)
 
-	result, err := collection.InsertOne(context.Background(), document)
+	result, err := collection.InsertOne(ctx, document)
 	if err != nil {
 		return false, fmt.Errorf("Error inserting document: %v", err)
 	}
@@ -173,7 +175,7 @@ func InsertDocument(db *mongo.Database, collectionName string, document bson.M) 
 	return result.InsertedID != nil, nil
 }
 
-func deleteDocument(db *mongo.Database, collectionName string, filter bson.D) (bool, error) {
+func DeleteDocument(db *mongo.Database, collectionName string, filter bson.D) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -203,13 +205,38 @@ func UpdateDocument(db *mongo.Database, collectionName string, filter bson.M, up
 	return result.ModifiedCount == 1, nil
 }
 
+func ConvertBsonToJson(bsonDoc bson.M) (string, error) {
+	// Marshal BSON to a byte array
+	jsonData, err := bson.Marshal(bsonDoc)
+	if err != nil {
+		return "", fmt.Errorf("error marshaling BSON: %v", err)
+	}
+
+	// Unmarshal the byte array to a map
+	var result map[string]interface{}
+	if err := bson.Unmarshal(jsonData, &result); err != nil {
+		return "", fmt.Errorf("error unmarshaling BSON to map: %v", err)
+	}
+
+	// Marshal the map to JSON
+	jsonOutput, err := json.MarshalIndent(result, "", "    ")
+	if err != nil {
+		return "", fmt.Errorf("error marshaling to JSON: %v", err)
+	}
+
+	return string(jsonOutput), nil
+}
+
 func FindDocument(db *mongo.Database, collectionName string, filter bson.M, projection bson.M) ([]bson.M, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	collection := db.Collection(collectionName)
 
-	findOptions := options.Find().SetProjection(projection)
+	findOptions := options.Find()
+	if projection != nil {
+		findOptions.SetProjection(projection)
+	}
 
 	cursor, err := collection.Find(ctx, filter, findOptions)
 	if err != nil {
@@ -233,7 +260,7 @@ func FindDocument(db *mongo.Database, collectionName string, filter bson.M, proj
 	return results, nil
 }
 
-func FetchContactAndChats(ctx context.Context, db *mongo.Database, accountID int64) ([]bson.M, error) {
+func FetchContactAndChats(db *mongo.Database, accountID int) ([]bson.M, error) {
 	collection := db.Collection("accounts")
 
 	pipeline := mongo.Pipeline{
@@ -301,6 +328,9 @@ func FetchContactAndChats(ctx context.Context, db *mongo.Database, accountID int
 		},
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	cursor, err := collection.Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, fmt.Errorf("error aggregating: %v", err)
@@ -323,7 +353,7 @@ func FetchContactAndChats(ctx context.Context, db *mongo.Database, accountID int
 	return result, nil
 }
 
-func fetchGroupsAndChats(db *mongo.Database, accountID int64) ([]bson.M, error) {
+func FetchGroupsAndChats(db *mongo.Database, accountID int) ([]bson.M, error) {
 	collection := db.Collection("accounts")
 
 	pipeline := mongo.Pipeline{
@@ -357,7 +387,10 @@ func fetchGroupsAndChats(db *mongo.Database, accountID int64) ([]bson.M, error) 
 		},
 	}
 
-	cursor, err := collection.Aggregate(context.TODO(), pipeline)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cursor, err := collection.Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, fmt.Errorf("MongoDB Exception: %v", err)
 	}
@@ -379,7 +412,60 @@ func fetchGroupsAndChats(db *mongo.Database, accountID int64) ([]bson.M, error) 
 	return results, nil
 }
 
-func deleteAccount(db *mongo.Database, accountID int64) error {
+func FetchContactIDs(db *mongo.Database, accountID int) ([]int, error) {
+	collection := db.Collection("accounts")
+
+	pipeline := mongo.Pipeline{
+		bson.D{{"$match", bson.D{{"_id", accountID}}}},
+		bson.D{{"$unwind", "$contacts"}},
+		bson.D{{"$group", bson.D{
+			{"_id", nil},
+			{"contactIDs", bson.D{{"$addToSet", "$contacts.contactID"}}},
+		}}},
+		bson.D{{"$project", bson.D{
+			{"_id", 0},
+			{"contactIDs", 1},
+		}}},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cursor, err := collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute aggregation: %v", err)
+	}
+	defer cursor.Close(context.TODO())
+
+	var contactIDs []int
+	for cursor.Next(context.TODO()) {
+		var result struct {
+			ContactIDs []interface{} `bson:"contactIDs"` // Change to interface{}
+		}
+		if err := cursor.Decode(&result); err != nil {
+			return nil, fmt.Errorf("failed to decode result: %v", err)
+		}
+
+		// Convert float64 contactIDs to int
+		for _, id := range result.ContactIDs {
+			if idFloat, ok := id.(float64); ok {
+				contactIDs = append(contactIDs, int(idFloat)) // Convert float64 to int
+			} else if idInt, ok := id.(int); ok {
+				contactIDs = append(contactIDs, idInt)
+			} else {
+				return nil, fmt.Errorf("unexpected contactID type: %T", id)
+			}
+		}
+	}
+
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("cursor error: %v", err)
+	}
+
+	return contactIDs, nil
+}
+
+func deleteAccount(db *mongo.Database, accountID int) error {
 	accountCollection := db.Collection("accounts")
 	groupCollection := db.Collection("groups")
 	chatsCollection := db.Collection("chats")

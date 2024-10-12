@@ -128,7 +128,6 @@ void server_manager::login_request(const int &phone_number, const QString &passw
 
     qDebug() << "Client: " << phone_number << " is connected";
 
-    _time_zone.insert(phone_number, time_zone);
     _clients.insert(phone_number, _socket);
     _socket->setProperty("id", phone_number);
 

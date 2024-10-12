@@ -2,13 +2,222 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
+
+	"github.com/gorilla/websocket"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
-func (sm *ServerManager) signUp(message map[string]interface{}) {
+type Client struct {
+	conn *websocket.Conn
+}
+
+func (sm *ServerManager) signUp(clientID int, message map[string]interface{}) {
+	sm.mutex.Lock()
+	client, exists := sm.clients[clientID]
+	sm.mutex.Unlock()
+	if !exists {
+		log.Printf("Client %d not found", clientID)
+		return
+	}
+
+	hashedPassword, err := HashPassword(message["password"].(string))
+	if err != nil {
+		log.Printf("Error hashing the password: %v", err)
+		response := map[string]interface{}{
+			"type":    "sign_up",
+			"status":  false,
+			"message": "Error creating account, try again",
+		}
+		signupResponse, _ := json.Marshal(response)
+		client.WriteMessage(1, signupResponse)
+		return
+	}
+
+	// Handle phone number as a float64 and convert to int
+	phoneNumberFloat, ok := message["phone_number"].(float64)
+	if !ok {
+		log.Printf("Error: phone_number is not a float64")
+		return
+	}
+	phoneNumber := int(phoneNumberFloat) // Convert float64 to int
+
+	bsonObject := bson.M{
+		"_id":             phoneNumber,
+		"first_name":      message["first_name"].(string),
+		"last_name":       message["last_name"].(string),
+		"image_url":       "",
+		"status":          false,
+		"hashed_password": hashedPassword,
+		"secret_question": message["secret_question"].(string),
+		"secret_answer":   message["secret_answer"].(string),
+		"contacts":        bson.A{},
+		"groups":          bson.A{},
+	}
+
+	success, err := InsertDocument(sm.chatAppDB, "accounts", bsonObject)
+	if err != nil {
+		log.Printf("Error Inserting the New account in the DB: %v", err)
+		response := map[string]interface{}{
+			"type":    "sign_up",
+			"status":  false,
+			"message": "Failed to Create Account, try again",
+		}
+		signupResponse, _ := json.Marshal(response)
+		client.WriteMessage(1, signupResponse)
+		return
+	}
+
+	response := map[string]interface{}{
+		"type":    "sign_up",
+		"status":  success,
+		"message": "Account Created Successfully, Reconnect",
+	}
+	if !success {
+		response["message"] = "Failed to Create Account, try again"
+	}
+
+	signupResponse, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Failed to marshal JSON response: %v", err)
+		return
+	}
+
+	err = client.WriteMessage(1, signupResponse)
+	if err != nil {
+		log.Printf("Failed to send message via WebSocket: %v", err)
+	}
 }
 
 func (sm *ServerManager) loginRequest(clientID int, message map[string]interface{}) {
+	if clientID == 0 {
+		return
+	}
+
+	phoneNumberFloat, ok := message["phone_number"].(float64)
+	if !ok {
+		log.Printf("Error: phone_number is not a float64")
+		return
+	}
+	phoneNumber := int(phoneNumberFloat)
+
+	sm.mutex.Lock()
+	sm.clients[phoneNumber] = sm.clients[clientID]
+	client := sm.clients[phoneNumber]
+	delete(sm.clients, clientID)
+	sm.mutex.Unlock()
+
+	clientID = phoneNumber
+
+	filter := bson.M{"_id": clientID}
+	// Fetch account from database
+	account, err := FindDocument(sm.chatAppDB, "accounts", filter, nil)
+	if err != nil || len(account) == 0 {
+		log.Printf("Error finding account: %v", err)
+
+		// Inform client that account does not exist
+		response := map[string]interface{}{
+			"type":    "login_request",
+			"status":  false,
+			"message": "Account doesn't exist in our database, verify and try again",
+		}
+		jsonMessage, err := json.Marshal(response)
+		if err != nil {
+			log.Printf("Failed to marshal message: %v", err)
+			return
+		}
+		client.WriteMessage(1, jsonMessage)
+		return
+	}
+
+	log.Printf("Account: %v", account)
+	// Verify the password
+	password := message["password"].(string)
+	// hashedPassword := account["hashed_password"].(string)
+	hashedPassword := ""
+	if success, err := VerifyPassword(password, hashedPassword); !success || err != nil {
+		log.Printf("Password verification failed for client %d: %v", clientID, err)
+
+		// Inform client that the password is incorrect
+		response := map[string]interface{}{
+			"type":    "login_request",
+			"status":  false,
+			"message": "Password Incorrect",
+		}
+		jsonMessage, err := json.Marshal(response)
+		if err != nil {
+			log.Printf("Failed to marshal message: %v", err)
+			return
+		}
+		client.WriteMessage(1, jsonMessage)
+		return
+	}
+
+	log.Printf("Client %d is connected", clientID)
+
+	update := bson.M{"status": true}
+	_, err = UpdateDocument(sm.chatAppDB, "accounts", filter, update)
+	if err != nil {
+		log.Printf("Error updating account status: %v", err)
+	}
+
+	// Fetch contacts and chats
+	contacts, err := FetchContactAndChats(sm.chatAppDB, clientID)
+	if err != nil {
+		log.Printf("Error fetching contacts: %v", err)
+		return
+	}
+
+	// Fetch groups and chats
+	groups, err := FetchGroupsAndChats(sm.chatAppDB, clientID)
+	if err != nil {
+		log.Printf("Error fetching groups: %v", err)
+		return
+	}
+
+	response := map[string]interface{}{
+		"type":     "login_request",
+		"status":   true,
+		"message":  "Loading your data...",
+		"my_info":  account,
+		"contacts": contacts,
+		"groups":   groups,
+	}
+
+	// Send successful response
+	jsonMessage, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Failed to marshal message: %v", err)
+		return
+	}
+	client.WriteMessage(1, jsonMessage)
+
+	// Notify the contacts that this client has connected
+	contactIDs, err := FetchContactIDs(sm.chatAppDB, clientID)
+	if err != nil {
+		log.Printf("Error fetching contact IDs: %v", err)
+		return
+	}
+
+	for _, contactID := range contactIDs {
+		sm.mutex.Lock()
+		contactClient, exists := sm.clients[contactID]
+		sm.mutex.Unlock()
+		if !exists {
+			continue
+		}
+
+		contactMessage := map[string]interface{}{
+			"type":         "client_connected",
+			"phone_number": clientID,
+		}
+		jsonMessage, err := json.Marshal(contactMessage)
+		if err != nil {
+			log.Printf("Failed to marshal message: %v", err)
+			return
+		}
+		contactClient.WriteMessage(1, jsonMessage)
+	}
 }
 
 func (sm *ServerManager) lookup_friend(clientID int, message map[string]interface{}) {
@@ -107,20 +316,20 @@ func (sm *ServerManager) handleMessage(clientID int, data []byte) {
 
 	err := json.Unmarshal(data, &message)
 	if err != nil {
-		fmt.Println("Error unmarshalling JSON:", err)
+		log.Println("Error unmarshalling JSON:", err)
 		return
 	}
 
 	msgType, ok := message["type"].(string)
 	if !ok {
-		fmt.Println("Error: message type not found or is not a string")
+		log.Println("Error: message type not found or is not a string")
 		return
 	}
 
 	if messageType, found := FromString(msgType); found {
 		switch messageType {
 		case SignUp:
-			go sm.signUp(message)
+			go sm.signUp(clientID, message)
 		case LoginRequest:
 			go sm.loginRequest(clientID, message)
 		case LookupFriend:
@@ -170,10 +379,10 @@ func (sm *ServerManager) handleMessage(clientID int, data []byte) {
 		case DeleteAccount:
 			go sm.delete_acount(clientID)
 		default:
-			fmt.Println("Unknown message type")
+			log.Println("Unknown message type")
 		}
 	} else {
-		fmt.Println("Invalid message type")
+		log.Println("Invalid message type")
 	}
 }
 

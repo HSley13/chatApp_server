@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -98,13 +99,44 @@ func (sm *ServerManager) handleDisconnections(clientID int) {
 	sm.mutex.Unlock()
 
 	filter := bson.M{"_id": clientID}
-	update := bson.M{"$set": bson.M{"status": false}}
-	_, err := sm.chatAppDB.Collection("accounts").UpdateOne(context.TODO(), filter, update)
+	update := bson.M{"status": false}
+	_, err := UpdateDocument(sm.chatAppDB, "accounts", filter, update)
 	if err != nil {
-		log.Println("Failed to update client status in MongoDB: ", err)
+		log.Printf("Failed to update Object: %v", err)
 	}
 
-	// TODO: notify all its contacts
+	contactIDs, err := FetchContactIDs(sm.chatAppDB, clientID)
+	if err != nil {
+		log.Printf("Error fetching contact IDs: %v", err)
+		return
+	}
+
+	for _, contactID := range contactIDs {
+		sm.mutex.Lock()
+		client, exists := sm.clients[contactID]
+		sm.mutex.Unlock()
+		if !exists {
+			log.Printf("Client %d not found", contactID)
+			continue
+		}
+
+		message := map[string]interface{}{
+			"type":         "client_disconnected",
+			"phone_number": clientID,
+		}
+
+		jsonMessage, err := json.Marshal(message)
+		if err != nil {
+			log.Printf("Failed to marshal JSON for client %d: %v", contactID, err)
+			continue
+		}
+
+		err = client.WriteMessage(1, jsonMessage)
+		if err != nil {
+			log.Printf("Failed to send message to client %d: %v", contactID, err)
+			continue
+		}
+	}
 }
 
 func (sm *ServerManager) Run() {
