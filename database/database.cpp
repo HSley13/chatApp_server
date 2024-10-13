@@ -2,7 +2,7 @@
 
 std::string S3::get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key) {
     Aws::S3::Model::GetObjectRequest request;
-    request.SetBucket(std::getenv("BUCKET_NAME"));
+    request.SetBucket(std::getenv("CHAT_APP_BUCKET_NAME"));
     request.SetKey(key.c_str());
 
     Aws::S3::Model::GetObjectOutcome outcome = s3_client.GetObject(request);
@@ -21,7 +21,7 @@ std::string S3::get_data_from_s3(const Aws::S3::S3Client &s3_client, const std::
 
 std::string S3::store_data_to_s3(Aws::S3::S3Client &s3_client, const std::string &key, const std::string &data) {
     Aws::S3::Model::PutObjectRequest request;
-    request.SetBucket(std::getenv("BUCKET_NAME"));
+    request.SetBucket(std::getenv("CHAT_APP_BUCKET_NAME"));
     request.SetKey(key.c_str());
 
     auto data_stream = Aws::MakeShared<Aws::StringStream>("PutObjectStream");
@@ -46,12 +46,12 @@ std::string S3::store_data_to_s3(Aws::S3::S3Client &s3_client, const std::string
 
 bool S3::delete_data_from_s3(const Aws::S3::S3Client &s3_client, const std::string &key) {
     Aws::S3::Model::DeleteObjectRequest request;
-    request.SetBucket(std::getenv("BUCKET_NAME"));
+    request.SetBucket(std::getenv("CHAT_APP_BUCKET_NAME"));
     request.SetKey(key.c_str());
 
     Aws::S3::Model::DeleteObjectOutcome outcome = s3_client.DeleteObject(request);
     if (outcome.IsSuccess()) {
-        std::cout << "Successfully deleted object from: " << std::getenv("BUCKET_NAME") << "/" << key << std::endl;
+        std::cout << "Successfully deleted object from: " << std::getenv("CHAT_APP_BUCKET_NAME") << "/" << key << std::endl;
 
         return true;
     } else {
@@ -61,39 +61,66 @@ bool S3::delete_data_from_s3(const Aws::S3::S3Client &s3_client, const std::stri
     }
 }
 
-QString Security::generate_random_salt(std::size_t len) {
-    const QString valid_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#&?!~^-$%*+";
-    QString salt;
+std::string Security::generate_random_salt(size_t length) {
+    const std::string valid_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-    for (size_t i{0}; i < len; i++) {
-        int index = QRandomGenerator::global()->bounded(valid_chars.size());
-        salt.append(valid_chars.at(index));
-    }
+    std::random_device rd;
+    std::mt19937 generator(rd());
+    std::uniform_int_distribution<> distribution(0, valid_chars.size() - 1);
+
+    std::string salt;
+    for (size_t i = 0; i < length; i++)
+        salt.push_back(valid_chars[distribution(generator)]);
 
     return salt;
 }
 
-QString Security::hashing_password(const QString &password) {
+std::string Security::hashing_password(const std::string &password) {
     const size_t SALT_LENGTH = 32;
-    QString salt = generate_random_salt(SALT_LENGTH);
 
-    QByteArray salted_password = salt.toUtf8() + password.toUtf8();
-    QByteArray hash = QCryptographicHash::hash(salted_password, QCryptographicHash::Sha256);
+    std::string salt = generate_random_salt(SALT_LENGTH);
 
-    return salt + QString::fromUtf8(hash.toHex());
+    const int t_cost = 2;
+    const int m_cost = 65536;
+    const int parallelism = 1;
+    const int hash_length = 32;
+
+    std::string hash;
+    hash.resize(hash_length);
+
+    int result = argon2_hash(t_cost, m_cost, parallelism, password.c_str(), password.length(), salt.c_str(), salt.length(), &hash[0], hash_length, nullptr, 0, Argon2_id, ARGON2_VERSION_NUMBER);
+
+    if (result != ARGON2_OK) {
+        std::cerr << "Error hashing password." << std::endl;
+
+        exit(EXIT_FAILURE);
+    }
+
+    std::string hashed_password = salt;
+    hashed_password.append(hash);
+
+    return hashed_password;
 }
 
-bool Security::verifying_password(const QString &password, const QString &hashed_password) {
-    const uint32_t hash_length = 64;
+bool Security::verifying_password(const std::string &inputPassword, const std::string &hashed_password) {
+    const int t_cost = 2;
+    const int m_cost = 65536;
+    const int parallelism = 1;
+    const int hash_length = 32;
+
     const size_t SALT_LENGTH = hashed_password.length() - hash_length;
 
-    QString salt = hashed_password.left(SALT_LENGTH);
-    QString original_hash = hashed_password.mid(SALT_LENGTH, hash_length);
+    std::string hash;
+    hash.resize(hash_length);
 
-    QByteArray salted_password = salt.toUtf8() + password.toUtf8();
-    QByteArray hash = QCryptographicHash::hash(salted_password, QCryptographicHash::Sha256);
+    int result = argon2_hash(t_cost, m_cost, parallelism, inputPassword.c_str(), inputPassword.length(), hashed_password.c_str(), SALT_LENGTH, &hash[0], hash_length, nullptr, 0, Argon2_id, ARGON2_VERSION_NUMBER);
 
-    return !original_hash.compare(QString::fromUtf8(hash.toHex()));
+    if (result != ARGON2_OK) {
+        std::cerr << "Error verifying password." << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    return !hashed_password.substr(SALT_LENGTH, hash_length).compare(hash);
 }
 
 bool Account::insert_document(mongocxx::database &db, const std::string &collection_name, const QJsonObject &json_object) {

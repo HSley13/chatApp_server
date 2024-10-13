@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	memory      = 64 * 1024 // 64MB
+	memory      = 64 * 1024
 	iterations  = 3
 	parallelism = 2
 	saltLength  = 16
@@ -205,28 +205,6 @@ func UpdateDocument(db *mongo.Database, collectionName string, filter bson.M, up
 	return result.ModifiedCount == 1, nil
 }
 
-func ConvertBsonToJson(bsonDoc bson.M) (string, error) {
-	// Marshal BSON to a byte array
-	jsonData, err := bson.Marshal(bsonDoc)
-	if err != nil {
-		return "", fmt.Errorf("error marshaling BSON: %v", err)
-	}
-
-	// Unmarshal the byte array to a map
-	var result map[string]interface{}
-	if err := bson.Unmarshal(jsonData, &result); err != nil {
-		return "", fmt.Errorf("error unmarshaling BSON to map: %v", err)
-	}
-
-	// Marshal the map to JSON
-	jsonOutput, err := json.MarshalIndent(result, "", "    ")
-	if err != nil {
-		return "", fmt.Errorf("error marshaling to JSON: %v", err)
-	}
-
-	return string(jsonOutput), nil
-}
-
 func FindDocument(db *mongo.Database, collectionName string, filter bson.M, projection bson.M) ([]bson.M, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -246,15 +224,15 @@ func FindDocument(db *mongo.Database, collectionName string, filter bson.M, proj
 
 	var results []bson.M
 	for cursor.Next(ctx) {
-		var doc bson.M
-		if err := cursor.Decode(&doc); err != nil {
+		var account bson.M
+		if err := cursor.Decode(&account); err != nil {
 			return nil, fmt.Errorf("Error Decoding Document: %v", err)
 		}
-		results = append(results, doc)
+		results = append(results, account)
 	}
 
 	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("Error iteration over the cursor: %v", err)
+		return nil, fmt.Errorf("Error iterating over the cursor: %v", err)
 	}
 
 	return results, nil

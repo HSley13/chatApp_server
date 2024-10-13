@@ -8,8 +8,7 @@
 #include <QWebSocketServer>
 #include <QtWidgets>
 
-#include <iostream>
-
+#include <argon2.h>
 #include <bsoncxx/builder/stream/document.hpp>
 #include <bsoncxx/json.hpp>
 #include <mongocxx/client.hpp>
@@ -29,11 +28,11 @@
 
 class Security {
   public:
-    static QString generate_random_salt(std::size_t len);
+    static std::string generate_random_salt(size_t length);
 
-    static QString hashing_password(const QString &password);
+    static std::string hashing_password(const std::string &password);
 
-    static bool verifying_password(const QString &password, const QString &hashed_password);
+    static bool verifying_password(const std::string &inputPassword, const std::string &hashed_password);
 };
 
 class Account {

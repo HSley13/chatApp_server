@@ -40,7 +40,7 @@ func (sm *ServerManager) signUp(clientID int, message map[string]interface{}) {
 		log.Printf("Error: phone_number is not a float64")
 		return
 	}
-	phoneNumber := int(phoneNumberFloat) // Convert float64 to int
+	phoneNumber := int(phoneNumberFloat)
 
 	bsonObject := bson.M{
 		"_id":             phoneNumber,
@@ -110,7 +110,7 @@ func (sm *ServerManager) loginRequest(clientID int, message map[string]interface
 	clientID = phoneNumber
 
 	filter := bson.M{"_id": clientID}
-	// Fetch account from database
+
 	account, err := FindDocument(sm.chatAppDB, "accounts", filter, nil)
 	if err != nil || len(account) == 0 {
 		log.Printf("Error finding account: %v", err)

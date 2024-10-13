@@ -20,11 +20,15 @@ server_manager::server_manager(QObject *parent)
 
     Aws::InitAPI(_options);
 
-    Aws::Auth::AWSCredentials credentials(std::getenv("ACCESS_KEY"), std::getenv("SECRET_ACCESS_KEY"));
+    Aws::Auth::AWSCredentials credentials(std::getenv("CHAT_APP_ACCESS_KEY"), std::getenv("CHAT_APP_SECRET_ACCESS_KEY"));
     Aws::Client::ClientConfiguration clientConfig;
-    clientConfig.region = std::getenv("BUCKET_REGION");
+    clientConfig.region = std::getenv("CHAT_APP_BUCKET_REGION");
 
     _s3_client = std::make_shared<Aws::S3::S3Client>(credentials, clientConfig, Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, true);
+    if (!_s3_client) {
+        qDebug() << "S3Client initialization failed";
+        return;
+    }
 
     _server->listen(_ip, _port);
     qDebug() << "Server is running on port:" << _port;
@@ -71,7 +75,7 @@ void server_manager::on_client_disconnected() {
 }
 
 void server_manager::sign_up(const int &phone_number, const QString &first_name, const QString &last_name, const QString &password, const QString &secret_question, const QString &secret_answer) {
-    const QString &hashed_password = Security::hashing_password(password);
+    const QString &hashed_password = QString::fromStdString(Security::hashing_password(password.toStdString()));
 
     QJsonObject json_object{{"_id", phone_number},
                             {"first_name", first_name},
@@ -114,7 +118,7 @@ void server_manager::login_request(const int &phone_number, const QString &passw
         return;
     }
 
-    if (!Security::verifying_password(password, json_doc.object()["hashed_password"].toString())) {
+    if (!Security::verifying_password(password.toStdString(), json_doc.object()["hashed_password"].toString().toStdString())) {
         QJsonObject json_message{{"type", "login_request"},
                                  {"status", false},
                                  {"message", "Password Incorrect"}};
@@ -531,7 +535,7 @@ void server_manager::group_is_typing_received(const int &groupID, const QString 
 }
 
 void server_manager::update_info_received(const QString &first_name, const QString &last_name, const QString &password) {
-    const QString &hashed_password = Security::hashing_password(password);
+    const QString &hashed_password = QString::fromStdString(Security::hashing_password(password.toStdString()));
 
     QJsonObject filter_object{{"_id", _clients.key(_socket)}};
     QJsonObject update_field{{"$set", QJsonObject{{"first_name", first_name},
@@ -554,7 +558,7 @@ void server_manager::update_info_received(const QString &first_name, const QStri
 }
 
 void server_manager::update_password(const int &phone_number, const QString &password) {
-    const QString &hashed_password = Security::hashing_password(password);
+    const QString &hashed_password = QString::fromStdString(Security::hashing_password(password.toStdString()));
 
     QJsonObject filter_object{{"_id", phone_number}};
     QJsonObject update_field{{"$set", QJsonObject{{"hashed_password", hashed_password}}}};
